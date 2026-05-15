@@ -82,7 +82,7 @@ async function rustMemberDirs(root: string): Promise<RustMemberDir[]> {
       });
     }
   }
-  return [...dirs.values()].sort((a, b) => a.dir.localeCompare(b.dir));
+  return [...dirs.values()].toSorted((a, b) => a.dir.localeCompare(b.dir));
 }
 
 async function cargoWorkspace(root: string): Promise<{

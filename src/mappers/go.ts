@@ -78,7 +78,7 @@ async function fallbackGoPackages(root: string, modulePath: string | null): Prom
     }
   }
   const packages: GoPackage[] = [];
-  for (const dir of [...dirs].sort()) {
+  for (const dir of [...dirs].toSorted()) {
     packages.push({
       dir,
       importPath: modulePath === null || dir === "" ? (modulePath ?? dir) : `${modulePath}/${dir}`,
@@ -151,7 +151,11 @@ async function goPackageFiles(root: string, dir: string): Promise<GoPackageFiles
     }
     owned.push(file);
   }
-  return { owned: owned.sort(), tests: tests.sort(), generated: generated.sort() };
+  return {
+    owned: owned.toSorted(),
+    tests: tests.toSorted(),
+    generated: generated.toSorted(),
+  };
 }
 
 async function isGeneratedGoFile(root: string, file: string): Promise<boolean> {

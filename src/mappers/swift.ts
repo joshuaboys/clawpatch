@@ -333,7 +333,7 @@ function groupSwiftFiles(
 ): Map<string, string[]> {
   const grouped = new Map<string, string[]>();
   const flatTarget = manifestTargets.size === 1 ? manifestTargets.values().next().value : undefined;
-  const customPaths = [...manifestPaths].sort((a, b) => b.path.length - a.path.length);
+  const customPaths = [...manifestPaths].toSorted((a, b) => b.path.length - a.path.length);
   for (const file of files) {
     const parts = file.split("/");
     const pathTarget = customPaths.find((entry) => pathMatchesSwiftPath(file, entry))?.target;

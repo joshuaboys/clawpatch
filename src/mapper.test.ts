@@ -97,12 +97,12 @@ describe("mapFeatures", () => {
     expect(titles).toContain("Go command tool");
     expect(titles).toContain("Go package store");
     expect(command?.ownedFiles[0]?.path).toBe("cmd/tool/main.go");
-    expect(command?.ownedFiles.map((file) => file.path).sort()).toEqual([
+    expect(command?.ownedFiles.map((file) => file.path).toSorted()).toEqual([
       "cmd/tool/aaa.go",
       "cmd/tool/main.go",
       "cmd/tool/root.go",
     ]);
-    expect(store?.ownedFiles.map((file) => file.path).sort()).toEqual([
+    expect(store?.ownedFiles.map((file) => file.path).toSorted()).toEqual([
       "internal/store/chats.go",
       "internal/store/groups.go",
     ]);
@@ -128,7 +128,7 @@ describe("mapFeatures", () => {
     const result = await mapFeatures(root, project, []);
     const app = result.features.find((feature) => feature.title === "Go package app");
 
-    expect(app?.contextFiles.map((file) => file.path).sort()).toEqual([
+    expect(app?.contextFiles.map((file) => file.path).toSorted()).toEqual([
       "internal/store/chats.go",
       "internal/store/groups.go",
     ]);
@@ -163,7 +163,7 @@ describe("mapFeatures", () => {
     const command = result.features.find((feature) => feature.title === "Go command main");
 
     expect(command?.entrypoints[0]?.path).toBe("main.go");
-    expect(command?.ownedFiles.map((file) => file.path).sort()).toEqual(["main.go", "root.go"]);
+    expect(command?.ownedFiles.map((file) => file.path).toSorted()).toEqual(["main.go", "root.go"]);
     expect(command?.tests).toEqual([{ path: "root_test.go", command: "go test ./..." }]);
   });
 

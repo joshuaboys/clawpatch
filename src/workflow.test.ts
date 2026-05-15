@@ -15,7 +15,7 @@ import {
   statusCommand,
   triageCommand,
 } from "./app.js";
-import { parseArgs } from "./cli.js";
+import { packageVersion, parseArgs } from "./cli.js";
 import { loadConfig } from "./config.js";
 import { runCommand } from "./exec.js";
 import {
@@ -36,6 +36,33 @@ import { findingRecordSchema } from "./types.js";
 describe("workflow", () => {
   it("rejects unknown long flags", () => {
     expect(() => parseArgs(["fix", "--finding", "f", "--dryrun"])).toThrow("unknown arg");
+  });
+
+  it("rejects unknown commands and missing required flags before context setup", () => {
+    expect(() => parseArgs(["nope"])).toThrow("unknown command: nope");
+    expect(() => parseArgs(["constructor"])).toThrow("unknown command: constructor");
+    expect(parseArgs(["revie", "--help"])).toMatchObject({ command: "revie", help: true });
+    expect(() => parseArgs(["show"])).toThrow("missing --finding");
+    expect(() => parseArgs(["triage", "--status", "fixed"])).toThrow("missing --finding");
+    expect(() => parseArgs(["revalidate"])).toThrow("missing --finding or --all");
+    expect(parseArgs(["revalidate", "--all"]).flags).toMatchObject({ all: true });
+  });
+
+  it("rejects value flags followed by another option token", () => {
+    expect(() => parseArgs(["show", "--finding", "--json"])).toThrow("missing value for --finding");
+    expect(() => parseArgs(["show", "--finding", "--bogus"])).toThrow(
+      "missing value for --finding",
+    );
+    expect(() => parseArgs(["report", "-o", "--json"])).toThrow("missing value for -o");
+    expect(() => parseArgs(["report", "-o", "-q"])).toThrow("missing value for -o");
+  });
+
+  it("prints package metadata version", async () => {
+    const pkg = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8")) as {
+      version: string;
+    };
+
+    expect(packageVersion()).toBe(pkg.version);
   });
 
   it("rejects unsupported command flags instead of ignoring them", () => {
@@ -259,7 +286,7 @@ describe("workflow", () => {
       falsePositive: 1,
       uncertain: 1,
     });
-    expect(updated.map((finding) => finding.status).sort()).toEqual([
+    expect(updated.map((finding) => finding.status).toSorted()).toEqual([
       "false-positive",
       "fixed",
       "open",

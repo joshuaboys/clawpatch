@@ -110,7 +110,7 @@ async function readRecords<T>(dir: string, schema: z.ZodType<T>): Promise<T[]> {
   }
   const names = await readdir(dir);
   const records: T[] = [];
-  for (const name of names.sort()) {
+  for (const name of names.toSorted()) {
     if (!name.endsWith(".json")) {
       continue;
     }

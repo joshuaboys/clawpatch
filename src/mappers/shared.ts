@@ -94,7 +94,7 @@ export async function walk(root: string, prefixes: string[]): Promise<string[]> 
     seenRoots.add(canonicalStart);
     await walkDir(realRoot, canonicalStart, files, seen);
   }
-  return files.sort();
+  return files.toSorted();
 }
 
 async function walkDir(

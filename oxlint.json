@@ -3,7 +3,7 @@
   "categories": {
     "correctness": "error",
     "suspicious": "error",
-    "perf": "warn"
+    "perf": "off"
   },
   "ignorePatterns": ["dist/**", "coverage/**", ".clawpatch/**", "fixtures/**"]
 }

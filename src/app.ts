@@ -1159,7 +1159,7 @@ function filterFindings(
 }
 
 function nextFinding(findings: FindingRecord[]): FindingRecord | null {
-  const ranked = [...findings].sort((a, b) => findingRank(a) - findingRank(b));
+  const ranked = findings.toSorted((a, b) => findingRank(a) - findingRank(b));
   return ranked[0] ?? null;
 }
 

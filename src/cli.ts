@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { realpathSync } from "node:fs";
+import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import {
   cleanLocksCommand,
@@ -19,7 +20,7 @@ import {
 import { ClawpatchError } from "./errors.js";
 import { GlobalOptions } from "./config.js";
 
-const version = "0.1.0";
+const moduleRequire = createRequire(import.meta.url);
 
 async function main(argv: string[]): Promise<void> {
   const parsed = parseArgs(argv);
@@ -28,7 +29,7 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
   if (parsed.version) {
-    process.stdout.write(`${version}\n`);
+    process.stdout.write(`${packageVersion()}\n`);
     return;
   }
   const context = await makeContext(parsed.global);
@@ -109,29 +110,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
       return { command, flags, global, help: false, version: true };
     }
     const valueName = arg.replace(/^--/u, "");
-    if (
-      [
-        "root",
-        "state-dir",
-        "config",
-        "feature",
-        "finding",
-        "limit",
-        "jobs",
-        "provider",
-        "model",
-        "output",
-        "status",
-        "severity",
-        "category",
-        "triage",
-        "note",
-      ].includes(valueName)
-    ) {
-      const next = argv[index + 1];
-      if (next === undefined) {
-        throw new ClawpatchError(`missing value for ${arg}`, 2, "invalid-usage");
-      }
+    if (valueFlagNames.has(valueName)) {
+      const next = readFlagValue(argv, index, arg);
       index += 1;
       setFlag(target, camel(valueName), next);
       continue;
@@ -149,10 +129,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       continue;
     }
     if (arg === "-o") {
-      const next = argv[index + 1];
-      if (next === undefined) {
-        throw new ClawpatchError("missing value for -o", 2, "invalid-usage");
-      }
+      const next = readFlagValue(argv, index, "-o");
       index += 1;
       flags["output"] = next;
       continue;
@@ -163,6 +140,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     command = "status";
   }
   validateCommandFlags(command, flags);
+  validateCommandRequirements(command, flags);
   return { command, flags, global, help: false, version: false };
 }
 
@@ -192,11 +170,64 @@ const commandFlags = {
   "clean-locks": new Set<string>(),
 } satisfies Record<string, Set<string>>;
 
-function validateCommandFlags(command: string, flags: Record<string, string | boolean>): void {
-  const allowed = commandFlags[command as keyof typeof commandFlags];
-  if (allowed === undefined) {
+const requiredCommandFlags: Partial<Record<keyof typeof commandFlags, string[]>> = {
+  show: ["finding"],
+  triage: ["finding", "status"],
+  fix: ["finding"],
+};
+
+const valueFlagNames = new Set([
+  "root",
+  "state-dir",
+  "config",
+  "feature",
+  "finding",
+  "limit",
+  "jobs",
+  "provider",
+  "model",
+  "output",
+  "status",
+  "severity",
+  "category",
+  "triage",
+  "note",
+]);
+
+const booleanFlagNames = new Set([
+  "json",
+  "plain",
+  "quiet",
+  "verbose",
+  "debug",
+  "no-color",
+  "no-input",
+  "dry-run",
+  "force",
+  "all",
+]);
+
+const shortFlagNames = new Set(["-h", "-q", "-v", "-o"]);
+
+export function packageVersion(): string {
+  const pkg = moduleRequire("../package.json") as { version?: unknown };
+  return typeof pkg.version === "string" ? pkg.version : "0.0.0";
+}
+
+function validateKnownCommand(command: string): void {
+  if (command === "") {
     return;
   }
+  if (!isKnownCommand(command)) {
+    throw new ClawpatchError(`unknown command: ${command}`, 2, "invalid-usage");
+  }
+}
+
+function validateCommandFlags(command: string, flags: Record<string, string | boolean>): void {
+  if (!isKnownCommand(command)) {
+    throw new ClawpatchError(`unknown command: ${command}`, 2, "invalid-usage");
+  }
+  const allowed = commandFlags[command];
   for (const flag of Object.keys(flags)) {
     if (!allowed.has(flag)) {
       throw new ClawpatchError(
@@ -208,19 +239,45 @@ function validateCommandFlags(command: string, flags: Record<string, string | bo
   }
 }
 
+function validateCommandRequirements(
+  command: string,
+  flags: Record<string, string | boolean>,
+): void {
+  if (!isKnownCommand(command)) {
+    throw new ClawpatchError(`unknown command: ${command}`, 2, "invalid-usage");
+  }
+  const required = requiredCommandFlags[command] ?? [];
+  for (const flag of required) {
+    if (typeof flags[flag] !== "string" || flags[flag].length === 0) {
+      throw new ClawpatchError(`missing --${kebab(flag)}`, 2, "invalid-usage");
+    }
+  }
+  if (command === "revalidate" && typeof flags["finding"] !== "string" && flags["all"] !== true) {
+    throw new ClawpatchError("missing --finding or --all", 2, "invalid-usage");
+  }
+}
+
+function isKnownCommand(command: string): command is keyof typeof commandFlags {
+  return Object.hasOwn(commandFlags, command);
+}
+
 function isBooleanFlag(name: string): boolean {
-  return [
-    "json",
-    "plain",
-    "quiet",
-    "verbose",
-    "debug",
-    "no-color",
-    "no-input",
-    "dry-run",
-    "force",
-    "all",
-  ].includes(name);
+  return booleanFlagNames.has(name);
+}
+
+function readFlagValue(argv: string[], index: number, flag: string): string {
+  const next = argv[index + 1];
+  if (next === undefined || isKnownOptionToken(next)) {
+    throw new ClawpatchError(`missing value for ${flag}`, 2, "invalid-usage");
+  }
+  return next;
+}
+
+function isKnownOptionToken(value: string): boolean {
+  if (shortFlagNames.has(value)) {
+    return true;
+  }
+  return value.startsWith("--");
 }
 
 function setFlag(
