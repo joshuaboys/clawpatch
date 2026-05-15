@@ -37,11 +37,12 @@ Review categories:
 - release/build hazards
 - maintainability risks with concrete impact
 
-Inspect owned files, context files, and linked tests. Treat tests as evidence of intended
-behavior when they clearly pin a contract, and avoid reporting behavior as a bug solely
-because a helper name implies a broader contract. When a bug pattern appears in one
-owned file, check sibling owned files for the same pattern and include sibling evidence
-instead of filing a narrow one-off finding.
+Inspect owned files, context files, and linked tests. Treat included tests as first-class
+evidence of intended behavior. If tests contradict a suspected bug, either skip it or
+downgrade confidence and explain the uncertainty. Avoid reporting behavior as a bug
+solely because a helper name implies a broader contract. Deduplicate sibling/root-cause
+issues: when the same bug pattern appears in multiple owned files, emit one finding
+with multiple evidence refs instead of separate one-off findings.
 
 Avoid speculative low-evidence findings. Evidence must point at included files.
 
@@ -56,7 +57,10 @@ JSON shape:
       "evidence": [{"path":"string","startLine":1,"endLine":1,"symbol":null,"quote":null}],
       "reasoning": "string",
       "reproduction": null,
-      "recommendation": "string"
+      "recommendation": "string",
+      "whyTestsDoNotAlreadyCoverThis": "string",
+      "suggestedRegressionTest": "string or null",
+      "minimumFixScope": "string"
     }
   ],
   "inspected": {"files":["string"],"symbols":["string"],"notes":["string"]}
@@ -68,6 +72,10 @@ ${fileBlocks.join("\n\n")}`;
 
 export async function buildRevalidatePrompt(root: string, findingJson: string): Promise<string> {
   return `Revalidate this clawpatch finding against the current repository at ${root}.
+
+Check whether the original evidence paths/lines still exist. If evidence moved or changed,
+decide whether the issue is fixed, stale/false-positive, still open elsewhere, or uncertain.
+Use tests and current code as evidence; do not assume a missing line means fixed.
 
 Return strict JSON only:
 {"outcome":"fixed|open|false-positive|uncertain","reasoning":"string","commands":["string"]}

@@ -84,6 +84,10 @@ const mockProvider: Provider = {
           reasoning: "Mock provider found an explicit bug marker.",
           reproduction: null,
           recommendation: "Replace marker with real handling.",
+          whyTestsDoNotAlreadyCoverThis:
+            "Mock fixtures do not encode this marker as intended behavior.",
+          suggestedRegressionTest: "Add a focused test that fails when TODO_BUG is present.",
+          minimumFixScope: "Replace the marker in the owning feature file.",
         },
       ],
       inspected: { files: ["src/index.ts"], symbols: [], notes: ["mock finding"] },
@@ -99,7 +103,20 @@ const mockProvider: Provider = {
       validationCommands: ["touch SHOULD_NOT_RUN_PROVIDER_COMMANDS"],
     };
   },
-  async revalidate(): Promise<RevalidateOutput> {
+  async revalidate(_root: string, prompt: string): Promise<RevalidateOutput> {
+    if (prompt.includes("REVALIDATE_FIXED")) {
+      return { outcome: "fixed", reasoning: "mock fixed outcome", commands: ["mock fixed"] };
+    }
+    if (prompt.includes("REVALIDATE_OPEN")) {
+      return { outcome: "open", reasoning: "mock open outcome", commands: ["mock open"] };
+    }
+    if (prompt.includes("REVALIDATE_FALSE_POSITIVE")) {
+      return {
+        outcome: "false-positive",
+        reasoning: "mock false-positive outcome",
+        commands: ["mock false-positive"],
+      };
+    }
     return { outcome: "uncertain", reasoning: "mock provider cannot inspect fixes", commands: [] };
   },
 };
@@ -181,6 +198,9 @@ const reviewJsonSchema = {
           "reasoning",
           "reproduction",
           "recommendation",
+          "whyTestsDoNotAlreadyCoverThis",
+          "suggestedRegressionTest",
+          "minimumFixScope",
         ],
         properties: {
           title: { type: "string" },
@@ -204,6 +224,9 @@ const reviewJsonSchema = {
           reasoning: { type: "string" },
           reproduction: { anyOf: [{ type: "string" }, { type: "null" }] },
           recommendation: { type: "string" },
+          whyTestsDoNotAlreadyCoverThis: { type: "string" },
+          suggestedRegressionTest: { anyOf: [{ type: "string" }, { type: "null" }] },
+          minimumFixScope: { type: "string" },
         },
       },
     },

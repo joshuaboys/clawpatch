@@ -1,3 +1,8 @@
+---
+title: Findings
+description: "Understanding finding records, statuses, and inspection commands"
+---
+
 # Findings
 
 Findings are stored in `.clawpatch/findings/<findingId>.json`.
@@ -14,8 +19,12 @@ Each finding records:
 - reasoning
 - reproduction notes
 - recommendation
+- why included tests do not already cover or define the behavior
+- suggested regression test
+- minimum fix scope
 - status
 - linked patch attempts
+- triage/revalidation history
 
 Statuses:
 
@@ -29,6 +38,8 @@ Current ways to inspect findings:
 
 ```bash
 clawpatch status
+clawpatch next
+clawpatch show --finding <findingId>
 clawpatch report
 clawpatch report -o report.md
 clawpatch report --json
@@ -39,8 +50,14 @@ clawpatch report --feature <featureId>
 Current ways to act on a finding:
 
 ```bash
+clawpatch triage --finding <findingId> --status false-positive --note "covered by contract test"
 clawpatch fix --finding <findingId>
 clawpatch revalidate --finding <findingId>
+clawpatch revalidate --all --status open --limit 10
 ```
 
-There is no interactive `triage` command yet.
+`next` prioritizes open high/medium-confidence confirmed bugs first, then
+security, data-loss, and concurrency findings, then the remaining queue.
+
+`triage` keeps existing finding IDs stable and appends a history entry instead
+of replacing previous reasoning.

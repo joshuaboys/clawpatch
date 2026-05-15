@@ -1,3 +1,8 @@
+---
+title: Reporting
+description: "Generate and filter finding reports in Markdown or JSON"
+---
+
 # Reporting
 
 `clawpatch report` renders current findings.
@@ -17,7 +22,10 @@ Markdown output includes:
 - feature ID and title when available
 - evidence file paths and line ranges when available
 - reasoning text
+- test-contract analysis when available
+- suggested regression test and minimum fix scope when available
 - recommendation and reproduction text when available
+- next inspection command for status-filtered queues
 
 `review` also writes a Markdown report for each run under:
 
@@ -35,4 +43,5 @@ Filters:
 
 `--json` returns sorted machine-readable finding items with IDs, status,
 severity, category, confidence, triage, feature info, evidence refs,
-recommendation, and reproduction fields. It does not require parsing Markdown.
+recommendation, reproduction, test-analysis, suggested-test, minimum-fix-scope,
+and next-command fields. It does not require parsing Markdown.

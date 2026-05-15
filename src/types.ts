@@ -206,6 +206,18 @@ export const evidenceRefSchema = z.object({
   quote: z.string().nullable(),
 });
 
+export const findingHistoryEntrySchema = z.object({
+  runId: z.string().nullable(),
+  kind: z.string(),
+  status: z.enum(["open", "false-positive", "fixed", "wont-fix", "uncertain"]).nullable(),
+  note: z.string().nullable(),
+  reasoning: z.string().nullable(),
+  commands: z.array(z.string()),
+  createdAt: z.string(),
+});
+
+export type FindingHistoryEntry = z.infer<typeof findingHistoryEntrySchema>;
+
 export const findingRecordSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -220,7 +232,11 @@ export const findingRecordSchema = z
     reasoning: z.string(),
     reproduction: z.string().nullable(),
     recommendation: z.string(),
+    whyTestsDoNotAlreadyCoverThis: z.string().optional(),
+    suggestedRegressionTest: z.string().nullable().optional(),
+    minimumFixScope: z.string().optional(),
     status: z.enum(["open", "false-positive", "fixed", "wont-fix", "uncertain"]),
+    history: z.array(findingHistoryEntrySchema).optional(),
     signature: z.string(),
     linkedPatchAttemptIds: z.array(z.string()),
     createdByRunId: z.string(),
@@ -230,6 +246,10 @@ export const findingRecordSchema = z
   .transform((finding) => ({
     ...finding,
     triage: finding.triage ?? deriveFindingTriage(finding.category, finding.confidence),
+    whyTestsDoNotAlreadyCoverThis: finding.whyTestsDoNotAlreadyCoverThis ?? "",
+    suggestedRegressionTest: finding.suggestedRegressionTest ?? null,
+    minimumFixScope: finding.minimumFixScope ?? "",
+    history: finding.history ?? [],
   }));
 
 export type FindingRecord = z.infer<typeof findingRecordSchema>;
@@ -310,6 +330,9 @@ export const reviewOutputSchema = z.object({
       reasoning: z.string(),
       reproduction: z.string().nullable(),
       recommendation: z.string(),
+      whyTestsDoNotAlreadyCoverThis: z.string(),
+      suggestedRegressionTest: z.string().nullable(),
+      minimumFixScope: z.string(),
     }),
   ),
   inspected: z.object({

@@ -31,8 +31,12 @@ clawpatch init
 clawpatch map
 clawpatch review --limit 3 --jobs 3
 clawpatch report
+clawpatch next
+clawpatch show --finding <id>
+clawpatch triage --finding <id> --status false-positive --note "covered by tests"
 clawpatch fix --finding <id>
 clawpatch revalidate --finding <id>
+clawpatch revalidate --all --status open
 ```
 
 `fix` does not commit, push, open PRs, or land changes. It runs configured
@@ -81,8 +85,12 @@ Direct OpenAI, Claude, Gemini, and provider panels are not implemented yet.
 - `clawpatch status`: show project, dirty state, feature/finding counts
 - `clawpatch review`: review pending or selected features
 - `clawpatch report`: print or write a Markdown findings report
+- `clawpatch next`: print the next actionable finding
+- `clawpatch show --finding <id>`: inspect one finding with evidence and suggested validation
+- `clawpatch triage --finding <id> --status <status>`: mark a finding with optional history note
 - `clawpatch fix --finding <id>`: run the explicit patch loop for one finding
 - `clawpatch revalidate --finding <id>`: re-check one finding
+- `clawpatch revalidate --all`: re-check open findings with report-style filters
 - `clawpatch doctor`: check provider availability
 - `clawpatch clean-locks`: clear feature locks
 

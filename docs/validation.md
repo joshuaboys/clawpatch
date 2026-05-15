@@ -1,3 +1,8 @@
+---
+title: Validation and Revalidation
+description: "Validation commands during fix workflow and revalidation process"
+---
+
 # Validation and Revalidation
 
 Validation happens during `clawpatch fix`.
@@ -26,10 +31,11 @@ Example:
 ```
 
 `clawpatch revalidate --finding <id>` runs a separate provider pass and updates
-the finding status based on that result.
+the finding status based on that result. `clawpatch revalidate --all` rechecks a
+filtered queue and records one history entry per finding.
 
 Current limitations:
 
 - no `--skip-*` validation flags
 - no targeted test command generation per finding
-- no batch revalidation
+- no parallel batch revalidation

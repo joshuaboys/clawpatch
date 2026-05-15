@@ -7,15 +7,20 @@ import {
   initCommand,
   makeContext,
   mapCommand,
+  nextCommand,
   reportCommand,
+  revalidateCommand,
   reviewCommand,
+  showCommand,
   statusCommand,
+  triageCommand,
 } from "./app.js";
 import { parseArgs } from "./cli.js";
 import { loadConfig } from "./config.js";
 import { runCommand } from "./exec.js";
 import {
   readFeatures,
+  readFinding,
   readFindings,
   readProject,
   readPatchAttempts,
@@ -56,6 +61,13 @@ describe("workflow", () => {
     expect(parseArgs(["report", "--status", "open", "--severity", "high"]).flags).toMatchObject({
       status: "open",
       severity: "high",
+    });
+    expect(
+      parseArgs(["triage", "--finding", "f", "--status", "wont-fix", "--note", "ok"]).flags,
+    ).toMatchObject({
+      finding: "f",
+      status: "wont-fix",
+      note: "ok",
     });
   });
 
@@ -131,6 +143,7 @@ describe("workflow", () => {
     expect(status).toMatchObject({ openFindings: 1 });
     expect(report).toMatchObject({ findings: 1 });
     expect(report).toMatchObject({ markdown: expect.stringContaining("src/index.ts:1") });
+    expect(report).toMatchObject({ markdown: expect.stringContaining("test analysis:") });
     expect(jsonReport).toMatchObject({
       findings: 1,
       items: [
@@ -139,8 +152,153 @@ describe("workflow", () => {
           severity: "medium",
           status: "open",
           evidence: [{ path: "src/index.ts", startLine: 1 }],
+          whyTestsDoNotAlreadyCoverThis: expect.any(String),
+          suggestedRegressionTest: expect.any(String),
+          minimumFixScope: expect.any(String),
         },
       ],
+    });
+    delete process.env["CLAWPATCH_PROVIDER"];
+  });
+
+  it("shows, prioritizes, and triages findings with history", async () => {
+    const root = await fixtureRoot("clawpatch-finding-lifecycle-");
+    await writeFixture(
+      root,
+      "package.json",
+      JSON.stringify({
+        name: "life",
+        bin: { life: "src/index.ts" },
+        scripts: { test: "vitest run" },
+      }),
+    );
+    await writeFixture(root, "src/index.ts", "export const value = 'TODO_BUG';\n");
+    process.env["CLAWPATCH_PROVIDER"] = "mock";
+    const context = await makeContext(testOptions(root));
+
+    await initCommand(context, {});
+    await mapCommand(context);
+    await reviewCommand(context, { limit: "1" });
+    const paths = statePaths(join(root, ".clawpatch"));
+    const finding = (await readFindings(paths))[0];
+    expect(finding).toBeDefined();
+
+    const next = await nextCommand(context, {});
+    const shown = await showCommand(context, { finding: finding!.findingId });
+    const report = await reportCommand(context, { status: "open" });
+    const triaged = await triageCommand(context, {
+      finding: finding!.findingId,
+      status: "false-positive",
+      note: "tests cover intended contract",
+    });
+    const updated = await readFinding(paths, finding!.findingId);
+
+    expect(next).toMatchObject({ finding: finding!.findingId });
+    expect(shown).toMatchObject({
+      markdown: expect.stringContaining(`next: clawpatch triage --finding ${finding!.findingId}`),
+    });
+    expect(report).toMatchObject({
+      markdown: expect.stringContaining(`next: clawpatch show --finding ${finding!.findingId}`),
+    });
+    expect(triaged).toMatchObject({ status: "false-positive" });
+    expect(updated?.status).toBe("false-positive");
+    expect(updated?.history.at(-1)).toMatchObject({
+      kind: "triage",
+      status: "false-positive",
+      note: "tests cover intended contract",
+    });
+    delete process.env["CLAWPATCH_PROVIDER"];
+  });
+
+  it("revalidates filtered findings in bulk and records history", async () => {
+    const root = await fixtureRoot("clawpatch-revalidate-all-");
+    await writeFixture(
+      root,
+      "package.json",
+      JSON.stringify({
+        name: "reval",
+        bin: {
+          fixed: "src/fixed.ts",
+          open: "src/open.ts",
+          falsey: "src/falsey.ts",
+          uncertain: "src/uncertain.ts",
+        },
+      }),
+    );
+    await writeFixture(root, "src/fixed.ts", "export const fixed = 'TODO_BUG';\n");
+    await writeFixture(root, "src/open.ts", "export const open = 'TODO_BUG';\n");
+    await writeFixture(root, "src/falsey.ts", "export const falsey = 'TODO_BUG';\n");
+    await writeFixture(root, "src/uncertain.ts", "export const uncertain = 'TODO_BUG';\n");
+    process.env["CLAWPATCH_PROVIDER"] = "mock";
+    const context = await makeContext(testOptions(root));
+
+    await initCommand(context, {});
+    await mapCommand(context);
+    await reviewCommand(context, { limit: "4", jobs: "2" });
+    const paths = statePaths(join(root, ".clawpatch"));
+    const findings = await readFindings(paths);
+    expect(findings).toHaveLength(4);
+    const markers = [
+      "REVALIDATE_FIXED",
+      "REVALIDATE_OPEN",
+      "REVALIDATE_FALSE_POSITIVE",
+      "REVALIDATE_UNCERTAIN",
+    ];
+    for (const [index, finding] of findings.entries()) {
+      await writeFinding(paths, { ...finding, reasoning: markers[index] ?? "" });
+    }
+
+    const result = await revalidateCommand(context, { all: true, status: "open", limit: "4" });
+    const updated = await readFindings(paths);
+    const features = await readFeatures(paths);
+
+    expect(result).toMatchObject({
+      revalidated: 4,
+      fixed: 1,
+      open: 1,
+      falsePositive: 1,
+      uncertain: 1,
+    });
+    expect(updated.map((finding) => finding.status).sort()).toEqual([
+      "false-positive",
+      "fixed",
+      "open",
+      "uncertain",
+    ]);
+    expect(updated.every((finding) => finding.history.at(-1)?.kind === "revalidate")).toBe(true);
+    const uncertain = updated.find((finding) => finding.status === "uncertain");
+    const uncertainFeature = features.find((feature) => feature.featureId === uncertain?.featureId);
+    expect(uncertainFeature?.status).toBe("needs-fix");
+    delete process.env["CLAWPATCH_PROVIDER"];
+  });
+
+  it("preserves selected finding ids when revalidation fails", async () => {
+    const root = await fixtureRoot("clawpatch-revalidate-fail-");
+    await writeFixture(
+      root,
+      "package.json",
+      JSON.stringify({ name: "reval-fail", bin: { fail: "src/fail.ts" } }),
+    );
+    await writeFixture(root, "src/fail.ts", "export const fail = 'TODO_BUG';\n");
+    process.env["CLAWPATCH_PROVIDER"] = "mock";
+    const context = await makeContext(testOptions(root));
+
+    await initCommand(context, {});
+    await mapCommand(context);
+    await reviewCommand(context, { limit: "1" });
+    const paths = statePaths(join(root, ".clawpatch"));
+    const finding = (await readFindings(paths))[0];
+    expect(finding).toBeDefined();
+
+    await expect(
+      revalidateCommand(context, { finding: finding!.findingId, provider: "mock-fail" }),
+    ).rejects.toThrow("mock revalidate failure");
+    const runs = await readRuns(paths);
+    const failed = runs.find((run) => run.command === "revalidate");
+
+    expect(failed).toMatchObject({
+      status: "failed",
+      findingIds: [finding!.findingId],
     });
     delete process.env["CLAWPATCH_PROVIDER"];
   });

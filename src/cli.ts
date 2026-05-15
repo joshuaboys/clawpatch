@@ -11,7 +11,10 @@ import {
   reportCommand,
   revalidateCommand,
   reviewCommand,
+  nextCommand,
+  showCommand,
   statusCommand,
+  triageCommand,
 } from "./app.js";
 import { ClawpatchError } from "./errors.js";
 import { GlobalOptions } from "./config.js";
@@ -49,6 +52,12 @@ async function dispatch(
       return reviewCommand(context, flags);
     case "report":
       return reportCommand(context, flags);
+    case "show":
+      return showCommand(context, flags);
+    case "next":
+      return nextCommand(context, flags);
+    case "triage":
+      return triageCommand(context, flags);
     case "fix":
       return fixCommand(context, flags);
     case "revalidate":
@@ -116,6 +125,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
         "severity",
         "category",
         "triage",
+        "note",
       ].includes(valueName)
     ) {
       const next = argv[index + 1];
@@ -162,8 +172,22 @@ const commandFlags = {
   status: new Set<string>(),
   review: new Set(["feature", "limit", "jobs", "provider", "model", "dryRun"]),
   report: new Set(["status", "severity", "feature", "category", "triage", "output"]),
+  show: new Set(["finding"]),
+  next: new Set(["status"]),
+  triage: new Set(["finding", "status", "note"]),
   fix: new Set(["finding", "provider", "model", "dryRun"]),
-  revalidate: new Set(["finding", "provider", "model"]),
+  revalidate: new Set([
+    "finding",
+    "all",
+    "status",
+    "severity",
+    "feature",
+    "category",
+    "triage",
+    "limit",
+    "provider",
+    "model",
+  ]),
   doctor: new Set<string>(),
   "clean-locks": new Set<string>(),
 } satisfies Record<string, Set<string>>;
@@ -195,6 +219,7 @@ function isBooleanFlag(name: string): boolean {
     "no-input",
     "dry-run",
     "force",
+    "all",
   ].includes(name);
 }
 
@@ -299,6 +324,44 @@ Flags:
 `);
     return;
   }
+  if (command === "show") {
+    process.stdout.write(`clawpatch show
+
+Usage:
+  clawpatch show --finding <id> [flags]
+
+Flags:
+  --finding <id>
+  --json
+`);
+    return;
+  }
+  if (command === "next") {
+    process.stdout.write(`clawpatch next
+
+Usage:
+  clawpatch next [flags]
+
+Flags:
+  --status <status>  default: open
+  --json
+`);
+    return;
+  }
+  if (command === "triage") {
+    process.stdout.write(`clawpatch triage
+
+Usage:
+  clawpatch triage --finding <id> --status <status> [flags]
+
+Flags:
+  --finding <id>
+  --status <open|false-positive|fixed|wont-fix|uncertain>
+  --note <text>
+  --json
+`);
+    return;
+  }
   if (command === "fix") {
     process.stdout.write(`clawpatch fix
 
@@ -346,6 +409,13 @@ Usage:
 
 Flags:
   --finding <id>
+  --all
+  --status <status>
+  --severity <severity>
+  --feature <id>
+  --category <category>
+  --triage <triage>
+  --limit <n>
   --provider <name>
   --model <name>
   --json
@@ -396,6 +466,9 @@ Commands:
   status
   review
   report
+  show
+  next
+  triage
   fix
   revalidate
   doctor

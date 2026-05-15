@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added finding queue commands, triage history, bulk revalidation filters, and stricter review evidence/test-analysis fields.
 - Fixed unsupported command-specific flags being accepted and ignored by commands that do not implement them.
 - Fixed package bin mapping so generated `dist`/`build` entries prefer matching TypeScript source files.
 
