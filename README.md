@@ -2,9 +2,29 @@
 
 Automated code review that lands fixes.
 
-`clawpatch` maps a codebase into reviewable feature slices, reviews each slice for real bugs and quality gaps through Codex, revalidates findings, and turns confirmed issues into repair patches when explicitly asked.
+`clawpatch` maps a repo into semantic feature slices, reviews each slice with a
+provider, persists findings, and can run an explicit fix loop for one finding at
+a time.
 
-Early commands:
+Current status: early CLI. Review/report/state are implemented; patching exists
+behind `clawpatch fix --finding <id>` and still requires manual review of the
+resulting worktree changes.
+
+## Install
+
+```bash
+pnpm add -g @openclaw/clawpatch
+```
+
+From source:
+
+```bash
+pnpm install
+pnpm build
+pnpm link --global
+```
+
+## Workflow
 
 ```bash
 clawpatch init
@@ -13,15 +33,100 @@ clawpatch review --limit 3
 clawpatch report
 clawpatch fix --finding <id>
 clawpatch revalidate --finding <id>
-clawpatch status
 ```
 
-Defaults are conservative:
+`fix` does not commit, push, open PRs, or land changes. It runs configured
+validation commands and records a patch attempt under `.clawpatch/`.
 
-- review/report only unless `fix` is requested
-- no commit, push, PR, or land
-- no destructive git commands
-- fixes require a clean worktree by default
-- state lives in `.clawpatch/`
+## What It Maps Today
 
-See [docs/spec.md](docs/spec.md) for the full product and CLI spec.
+- npm package bins
+- selected package scripts: `start`, `build`, `test`, `lint`, `typecheck`,
+  `format`
+- Next.js `app/` and `pages/` routes
+- Go `cmd/*/main.go` commands
+- Go `internal/*` package slices
+- common project config files
+
+Swift, Rust, deeper framework mappers, and agent-assisted enrichment are next
+steps.
+
+## Provider
+
+The default provider is the local Codex CLI.
+
+```bash
+codex --version
+clawpatch doctor
+```
+
+Provider calls use `codex exec` with strict JSON schemas. Review and revalidate
+run read-only; fix planning runs with workspace-write because Codex may edit the
+working tree during the explicit fix command.
+
+Supported provider names today:
+
+- `codex`: local Codex CLI
+- `mock`: deterministic test provider
+- `mock-fail`: failure test provider
+
+Direct OpenAI, Claude, Gemini, and provider panels are not implemented yet.
+
+## Commands
+
+- `clawpatch init`: create `.clawpatch/`, detect project basics, write config
+- `clawpatch map`: write feature records
+- `clawpatch status`: show project, dirty state, feature/finding counts
+- `clawpatch review`: review pending or selected features
+- `clawpatch report`: print or write a Markdown findings report
+- `clawpatch fix --finding <id>`: run the explicit patch loop for one finding
+- `clawpatch revalidate --finding <id>`: re-check one finding
+- `clawpatch doctor`: check provider availability
+- `clawpatch clean-locks`: clear feature locks
+
+Useful flags:
+
+- `--root <path>`
+- `--state-dir <path>`
+- `--config <path>`
+- `--json`
+- `--plain`
+- `--limit <n>`
+- `--feature <id>`
+- `--finding <id>`
+- `--provider <name>`
+- `--model <name>`
+- `--output <path>` / `-o <path>`
+- `--dry-run`
+- `--force`
+
+Unknown flags fail fast.
+
+## State
+
+State is project-local by default:
+
+```text
+.clawpatch/
+  config.json
+  project.json
+  features/*.json
+  findings/*.json
+  patches/*.json
+  reports/*.md
+  runs/*.json
+```
+
+Feature records are the durable work units. Findings and patch attempts link back
+to features so runs can resume and be audited.
+
+## Safety
+
+- Review does not edit files.
+- Fix is explicit and selected by finding ID.
+- Fix refuses a dirty source worktree by default.
+- Clawpatch never commits, pushes, opens PRs, or lands changes today.
+- Provider output is parsed through strict schemas.
+- Symlinked directories and generated build output are skipped during mapping.
+
+See `docs/spec.md` for the longer product and implementation spec.

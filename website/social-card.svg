@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#fef9f5;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#f4e8db;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="textGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#ff6b4a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#2a9d8f;stop-opacity:1" />
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%">
+      <stop offset="0%" style="stop-color:#ff6b4a;stop-opacity:0.2" />
+      <stop offset="100%" style="stop-color:#ff6b4a;stop-opacity:0" />
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+
+  <!-- Decorative glow -->
+  <circle cx="900" cy="150" r="300" fill="url(#glow)"/>
+
+  <!-- Large claw icon -->
+  <g transform="translate(120, 200)">
+    <g transform="scale(2.5)">
+      <!-- Left pincer -->
+      <path d="M-20 0 Q-28 -12, -32 -18 L-24 -22 Q-20 -16, -15 -5 Z" fill="#ff6b4a"/>
+      <path d="M-15 15 Q-20 20, -24 25 L-18 28 Q-14 23, -10 15 Z" fill="#ff6b4a"/>
+      <!-- Right pincer -->
+      <path d="M20 0 Q28 -12, 32 -18 L24 -22 Q20 -16, 15 -5 Z" fill="#ff8a6d"/>
+      <path d="M15 15 Q20 20, 24 25 L18 28 Q14 23, 10 15 Z" fill="#ff8a6d"/>
+      <!-- Center joint -->
+      <ellipse cx="0" cy="5" rx="20" ry="16" fill="url(#textGrad)"/>
+      <ellipse cx="-5" cy="0" rx="6" ry="5" fill="rgba(255,255,255,0.3)"/>
+    </g>
+  </g>
+
+  <!-- Text content -->
+  <text x="350" y="235" font-family="Inter, sans-serif" font-size="72" font-weight="800" fill="url(#textGrad)">
+    clawpatch
+  </text>
+  <text x="350" y="300" font-family="Inter, sans-serif" font-size="36" font-weight="600" fill="#2c3e50">
+    Automated code review that lands fixes
+  </text>
+  <text x="350" y="370" font-family="Inter, sans-serif" font-size="26" fill="#6c7a89">
+    Semantic analysis • Automated patching • Safety first
+  </text>
+
+  <!-- Bottom badge -->
+  <g transform="translate(350, 450)">
+    <rect width="460" height="60" rx="30" fill="#ff6b4a" opacity="0.1"/>
+    <text x="230" y="40" font-family="JetBrains Mono, monospace" font-size="22" font-weight="500" fill="#ff6b4a" text-anchor="middle">
+      npm install @openclaw/clawpatch
+    </text>
+  </g>
+
+  <!-- Decorative elements -->
+  <circle cx="1050" cy="500" r="40" fill="#ff6b4a" opacity="0.15"/>
+  <circle cx="950" cy="550" r="25" fill="#2a9d8f" opacity="0.15"/>
+  <circle cx="1100" cy="480" r="30" fill="#52b788" opacity="0.15"/>
+</svg>
