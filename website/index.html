@@ -1042,8 +1042,8 @@
             <div class="feature-icon">🦀</div>
             <h3>Semantic Analysis</h3>
             <p>
-              Reviews by feature records such as package bins, scripts, routes, Go commands, and
-              config.
+              Reviews by feature records such as package bins, scripts, routes, Go/Rust/Swift
+              commands, and config.
             </p>
           </div>
 
@@ -1160,8 +1160,8 @@
             </li>
           </ul>
           <p>
-            Clawpatch auto-detects Node.js, TypeScript, Next.js, Go, and common build tools. You can
-            customize settings after initialization.
+            Clawpatch auto-detects Node.js, TypeScript, Next.js, Go, Rust/Cargo, SwiftPM, and common
+            build tools. You can customize settings after initialization.
           </p>
 
           <h2 id="feature-mapping">Feature Mapping</h2>
@@ -1170,8 +1170,12 @@
           <p>Features are semantic units like:</p>
           <ul>
             <li><strong>Routes</strong> — Next.js app and pages routes</li>
-            <li><strong>Commands</strong> — npm package bins and Go commands</li>
-            <li><strong>Packages</strong> — Go internal packages</li>
+            <li>
+              <strong>Commands</strong> — npm package bins plus Go, Rust, and SwiftPM commands
+            </li>
+            <li>
+              <strong>Packages</strong> — Go internal packages, Rust libraries, and Swift targets
+            </li>
             <li><strong>CLI scripts</strong> — Bin scripts and npm script handlers</li>
             <li><strong>Tests</strong> — Test suites linked to their subjects</li>
           </ul>
@@ -1247,6 +1251,8 @@
     <span class="hl-s">"node_modules/**"</span>,
     <span class="hl-s">"dist/**"</span>,
     <span class="hl-s">"build/**"</span>,
+    <span class="hl-s">"target/**"</span>,
+    <span class="hl-s">".build/**"</span>,
     <span class="hl-s">".git/**"</span>,
     <span class="hl-s">".clawpatch/**"</span>
   ],

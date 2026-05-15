@@ -403,7 +403,15 @@ Initial config:
   "schemaVersion": 1,
   "stateDir": ".clawpatch",
   "include": ["**/*"],
-  "exclude": ["node_modules/**", "dist/**", "build/**", ".git/**", ".clawpatch/**"],
+  "exclude": [
+    "node_modules/**",
+    "dist/**",
+    "build/**",
+    "target/**",
+    ".build/**",
+    ".git/**",
+    ".clawpatch/**"
+  ],
   "provider": {
     "name": "openai",
     "model": "gpt-5.2"
@@ -688,16 +696,18 @@ Mappers:
 - TypeScript/JavaScript CLI command registries when cheap to detect.
 - Next.js `app/**/page.*`, `app/**/route.*`, `pages/**`.
 - Express/Fastify/Hono route registrations.
+- Go `cmd/*` commands and `internal/*` packages.
+- Rust Cargo commands, libraries, workspace crates, and integration tests.
+- SwiftPM executable targets, library targets, and test suites.
 - Test suites from common test file globs.
 - Config/release features from package/build/release files.
 - Shared infra from auth/session/db/process/fs/network/secrets files.
 
 Later mappers:
 
-- Go `cmd/*`, `internal/*`, HTTP handlers.
-- Rust `src/bin/*`, Clap command trees.
+- Go HTTP handlers.
+- Rust Clap command trees.
 - Python Click/Typer/argparse/FastAPI.
-- SwiftPM executable targets.
 
 Feature expansion:
 

@@ -1,3 +1,5 @@
+import { symlink } from "node:fs/promises";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { detectProject } from "./detect.js";
 import { mapFeatures } from "./mapper.js";
@@ -12,7 +14,7 @@ describe("mapFeatures", () => {
       JSON.stringify(
         {
           name: "fixture-app",
-          bin: { fixture: "src/cli.ts" },
+          bin: { fixture: "src/Core.ts" },
           scripts: { build: "tsc", test: "vitest run" },
           dependencies: { next: "1.0.0" },
         },
@@ -21,11 +23,18 @@ describe("mapFeatures", () => {
       ),
     );
     await writeFixture(root, "tsconfig.json", "{}");
-    await writeFixture(root, "src/cli.ts", "export function main() {}\n");
+    await writeFixture(root, "src/Core.ts", "export function main() {}\n");
+    await writeFixture(root, "Tests/CoreTests/CoreTests.swift", "import Testing\n");
+    await writeFixture(root, "tests/core.rs", "#[test]\nfn core() {}\n");
     await writeFixture(
       root,
       "app/users/[id]/page.tsx",
       "export default function Page() { return null; }\n",
+    );
+    await writeFixture(
+      root,
+      "app/target/page.tsx",
+      "export default function TargetPage() { return null; }\n",
     );
 
     const project = await detectProject(root);
@@ -37,6 +46,10 @@ describe("mapFeatures", () => {
     expect(titles).toContain("Package script build");
     expect(titles).toContain("Package script test");
     expect(titles).toContain("Route /users/:id");
+    expect(titles).toContain("Route /target");
+    expect(
+      result.features.find((feature) => feature.title === "CLI command fixture")?.tests,
+    ).toEqual([]);
   });
 
   it("maps Go commands and internal packages", async () => {
@@ -53,5 +66,963 @@ describe("mapFeatures", () => {
     expect(project.detected.commands.test).toBe("go test ./...");
     expect(titles).toContain("Go command tool");
     expect(titles).toContain("Go package store");
+  });
+
+  it("maps Rust commands, libraries, integration tests, and Cargo defaults", async () => {
+    const root = await fixtureRoot("clawpatch-rust-map-");
+    await writeFixture(root, "Cargo.toml", '[package]\nname = "rusty-tool"\n');
+    await writeFixture(root, "src/main.rs", "fn main() {}\n");
+    await writeFixture(root, "src/lib.rs", "pub fn run() {}\n");
+    await writeFixture(root, "src/bin/worker.rs", "fn main() {}\n");
+    await writeFixture(root, "src/bin/admin/main.rs", "fn main() {}\n");
+    await writeFixture(root, "crates/member/Cargo.toml", '[package]\nname = "member"\n');
+    await writeFixture(root, "crates/member/src/lib.rs", "pub fn member() {}\n");
+    await writeFixture(
+      root,
+      "crates/member/tests/member_integration.rs",
+      "#[test]\nfn works() {}\n",
+    );
+    await writeFixture(root, "tests/integration.rs", "#[test]\nfn works() {}\n");
+    await writeFixture(root, "tests/app.test.ts", "test('js', () => {});\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(project.detected.languages).toContain("rust");
+    expect(project.detected.packageManagers).toContain("cargo");
+    expect(project.detected.commands.typecheck).toBe("cargo check --workspace --all-targets");
+    expect(project.detected.commands.format).toBe("cargo fmt --all --check");
+    expect(project.detected.commands.test).toBe("cargo test --workspace");
+    expect(titles).toContain("Rust command admin");
+    expect(titles).toContain("Rust command rusty-tool");
+    expect(titles).toContain("Rust command worker");
+    expect(titles).toContain("Rust library rusty-tool");
+    expect(titles).toContain("Rust library member");
+    expect(titles).toContain("Rust integration test integration");
+    expect(titles).toContain("Rust integration test member/member_integration");
+    expect(
+      result.features.find((feature) => feature.title === "Rust library rusty-tool")?.tests,
+    ).toEqual([{ path: "tests/integration.rs", command: "cargo test --workspace" }]);
+    expect(
+      result.features.find((feature) => feature.title === "Rust library member")?.tests,
+    ).toEqual([
+      {
+        path: "crates/member/tests/member_integration.rs",
+        command: "cargo test --manifest-path crates/member/Cargo.toml",
+      },
+    ]);
+  });
+
+  it("keeps Node scripts and native defaults in mixed package repos", async () => {
+    const root = await fixtureRoot("clawpatch-mixed-map-");
+    await writeFixture(
+      root,
+      "package.json",
+      JSON.stringify({ name: "mixed", scripts: { lint: "oxlint" } }, null, 2),
+    );
+    await writeFixture(root, "go.mod", "module example.com/mixed\n");
+    await writeFixture(root, "cmd/tool/main.go", "package main\nfunc main() {}\n");
+    await writeFixture(root, "Cargo.toml", '[package]\nname = "mixed"\n');
+    await writeFixture(root, "src/lib.rs", "pub fn run() {}\n");
+    await writeFixture(root, "tests/integration.rs", "#[test]\nfn works() {}\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+
+    expect(project.detected.packageManagers).toEqual(["node", "cargo"]);
+    expect(project.detected.commands.typecheck).toBe("go test ./...");
+    expect(project.detected.commands.lint).toBe("npm run lint");
+    expect(project.detected.commands.format).toBeNull();
+    expect(project.detected.commands.test).toBe("go test ./...");
+    expect(
+      result.features.find((feature) => feature.title === "Rust library mixed")?.tests,
+    ).toEqual([{ path: "tests/integration.rs", command: "cargo test --workspace" }]);
+  });
+
+  it("maps Cargo workspace members outside crates", async () => {
+    const root = await fixtureRoot("clawpatch-rust-workspace-");
+    await writeFixture(root, "Cargo.toml", "[workspace]\nmembers = ['cli', 'core']\n");
+    await writeFixture(root, "cli/Cargo.toml", '[package]\nname = "workspace-cli"\n');
+    await writeFixture(root, "cli/src/main.rs", "fn main() {}\n");
+    await writeFixture(root, "core/Cargo.toml", '[package]\nname = "workspace-core"\n');
+    await writeFixture(root, "core/src/lib.rs", "pub fn run() {}\n");
+    await writeFixture(root, "core/tests/core_integration.rs", "#[test]\nfn works() {}\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(titles).toContain("Rust command workspace-cli");
+    expect(titles).toContain("Rust library workspace-core");
+    expect(titles).toContain("Rust integration test workspace-core/core_integration");
+    expect(
+      result.features.find((feature) => feature.title === "Rust library workspace-core")?.tests,
+    ).toEqual([{ path: "core/tests/core_integration.rs", command: "cargo test --workspace" }]);
+  });
+
+  it("does not map virtual Cargo workspace root sources", async () => {
+    const root = await fixtureRoot("clawpatch-rust-virtual-workspace-");
+    await writeFixture(root, "Cargo.toml", '[workspace]\nmembers = ["core"]\n');
+    await writeFixture(root, "src/lib.rs", "pub fn ignored() {}\n");
+    await writeFixture(root, "src/main.rs", "fn main() {}\n");
+    await writeFixture(root, "tests/root.rs", "#[test]\nfn ignored() {}\n");
+    await writeFixture(root, "core/Cargo.toml", '[package]\nname = "core"\n');
+    await writeFixture(root, "core/src/lib.rs", "pub fn core() {}\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(titles).toContain("Rust library core");
+    expect(titles).not.toContain("Rust library crate");
+    expect(titles).not.toContain("Rust command crate");
+    expect(titles).not.toContain("Rust integration test root");
+  });
+
+  it("reads Cargo package names from the package section", async () => {
+    const root = await fixtureRoot("clawpatch-rust-package-name-");
+    await writeFixture(
+      root,
+      "Cargo.toml",
+      `[workspace.metadata]
+name = "workspace-name"
+
+[package]
+name = 'actual-pkg'
+`,
+    );
+    await writeFixture(root, "src/main.rs", "fn main() {}\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(titles).toContain("Rust command actual-pkg");
+    expect(titles).not.toContain("Rust command workspace-name");
+  });
+
+  it("ignores commented and excluded Cargo workspace members", async () => {
+    const root = await fixtureRoot("clawpatch-rust-workspace-comments-");
+    await writeFixture(
+      root,
+      "Cargo.toml",
+      `[workspace]
+members = [
+  # "old",
+  "./crates/*/"
+]
+exclude = ["./crates/old/"]
+`,
+    );
+    await writeFixture(root, "old/Cargo.toml", '[package]\nname = "old"\n');
+    await writeFixture(root, "old/src/lib.rs", "pub fn old() {}\n");
+    await writeFixture(root, "crates/old/Cargo.toml", '[package]\nname = "old-crate"\n');
+    await writeFixture(root, "crates/old/src/lib.rs", "pub fn old_crate() {}\n");
+    await writeFixture(root, "crates/core/Cargo.toml", '[package]\nname = "core"\n');
+    await writeFixture(root, "crates/core/src/lib.rs", "pub fn core() {}\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(titles).toContain("Rust library core");
+    expect(titles.filter((title) => title === "Rust library core")).toHaveLength(1);
+    expect(titles).not.toContain("Rust library old");
+    expect(titles).not.toContain("Rust library old-crate");
+  });
+
+  it("expands Cargo workspace member glob segments", async () => {
+    const root = await fixtureRoot("clawpatch-rust-workspace-glob-");
+    await writeFixture(root, "Cargo.toml", '[workspace]\nmembers = ["crates/o*"]\n');
+    await writeFixture(root, "crates/old-one/Cargo.toml", '[package]\nname = "old-one"\n');
+    await writeFixture(root, "crates/old-one/src/lib.rs", "pub fn old() {}\n");
+    await writeFixture(root, "crates/new-one/Cargo.toml", '[package]\nname = "new-one"\n');
+    await writeFixture(root, "crates/new-one/src/lib.rs", "pub fn new() {}\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(titles).toContain("Rust library old-one");
+    expect(titles).not.toContain("Rust library new-one");
+  });
+
+  it("does not map Cargo workspace members without package manifests", async () => {
+    const root = await fixtureRoot("clawpatch-rust-member-manifest-");
+    await writeFixture(root, "Cargo.toml", '[workspace]\nmembers = ["crates/*"]\n');
+    await writeFixture(root, "crates/template/src/lib.rs", "pub fn template() {}\n");
+    await writeFixture(root, "crates/real/Cargo.toml", '[package]\nname = "real"\n');
+    await writeFixture(root, "crates/real/src/lib.rs", "pub fn real() {}\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(titles).toContain("Rust library real");
+    expect(titles).not.toContain("Rust library template");
+  });
+
+  it("ignores Cargo members outside the workspace section", async () => {
+    const root = await fixtureRoot("clawpatch-rust-metadata-members-");
+    await writeFixture(
+      root,
+      "Cargo.toml",
+      `[package]
+name = "root"
+
+[package.metadata.foo]
+members = ["tools/old"]
+`,
+    );
+    await writeFixture(root, "src/lib.rs", "pub fn root() {}\n");
+    await writeFixture(root, "tools/old/Cargo.toml", '[package]\nname = "old"\n');
+    await writeFixture(root, "tools/old/src/lib.rs", "pub fn old() {}\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(titles).toContain("Rust library root");
+    expect(titles).not.toContain("Rust library old");
+  });
+
+  it("skips duplicate and symlinked Cargo workspace members", async () => {
+    const root = await fixtureRoot("clawpatch-rust-workspace-safe-");
+    const external = await fixtureRoot("clawpatch-rust-workspace-external-");
+    await writeFixture(
+      root,
+      "Cargo.toml",
+      '[package]\nname = "rootpkg"\n\n[workspace]\nmembers = [".", "linked/member"]\n',
+    );
+    await writeFixture(root, "src/lib.rs", "pub fn root() {}\n");
+    await writeFixture(external, "member/Cargo.toml", '[package]\nname = "outside"\n');
+    await writeFixture(external, "member/src/lib.rs", "pub fn outside() {}\n");
+    await symlink(external, join(root, "linked"), "dir");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+    const paths = result.features.flatMap((feature) =>
+      feature.entrypoints.map((entrypoint) => entrypoint.path),
+    );
+
+    expect(titles.filter((title) => title === "Rust library rootpkg")).toHaveLength(1);
+    expect(titles).not.toContain("Rust library outside");
+    expect(paths).not.toContain("./src/lib.rs");
+    expect(paths.some((path) => path.startsWith("../"))).toBe(false);
+  });
+
+  it("does not scan symlinked conventional crates directories", async () => {
+    const root = await fixtureRoot("clawpatch-rust-crates-symlink-root-");
+    const external = await fixtureRoot("clawpatch-rust-crates-symlink-external-");
+    await writeFixture(root, "Cargo.toml", '[package]\nname = "rootpkg"\n');
+    await writeFixture(root, "src/lib.rs", "pub fn root() {}\n");
+    await writeFixture(external, "member/Cargo.toml", '[package]\nname = "outside-member"\n');
+    await writeFixture(external, "member/src/lib.rs", "pub fn outside() {}\n");
+    await symlink(external, join(root, "crates"), "dir");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(titles).toContain("Rust library rootpkg");
+    expect(titles).not.toContain("Rust library outside-member");
+  });
+
+  it("does not map Rust entrypoints through symlinked source directories", async () => {
+    const root = await fixtureRoot("clawpatch-rust-src-symlink-root-");
+    const externalRoot = await fixtureRoot("clawpatch-rust-src-symlink-external-root-");
+    const externalMember = await fixtureRoot("clawpatch-rust-src-symlink-external-member-");
+    await writeFixture(
+      root,
+      "Cargo.toml",
+      '[package]\nname = "rootpkg"\n\n[workspace]\nmembers = ["member"]\n',
+    );
+    await writeFixture(root, "member/Cargo.toml", '[package]\nname = "memberpkg"\n');
+    await writeFixture(externalRoot, "lib.rs", "pub fn outside() {}\n");
+    await writeFixture(externalMember, "lib.rs", "pub fn outside() {}\n");
+    await symlink(externalRoot, join(root, "src"), "dir");
+    await symlink(externalMember, join(root, "member/src"), "dir");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+    const paths = result.features.flatMap((feature) =>
+      feature.entrypoints.map((entrypoint) => entrypoint.path),
+    );
+
+    expect(titles).not.toContain("Rust library rootpkg");
+    expect(titles).not.toContain("Rust library memberpkg");
+    expect(paths.some((path) => path.startsWith("../"))).toBe(false);
+  });
+
+  it("skips native build output during root test discovery", async () => {
+    const root = await fixtureRoot("clawpatch-native-build-skip-");
+    await writeFixture(root, "Cargo.toml", '[package]\nname = "rootpkg"\n');
+    await writeFixture(root, "src/lib.rs", "pub fn root() {}\n");
+    await writeFixture(root, "target/Cargo.test.ts", "test('generated', () => {});\n");
+    await writeFixture(root, ".build/Cargo.test.ts", "test('generated', () => {});\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const config = result.features.find((feature) => feature.title === "Project config Cargo.toml");
+
+    expect(config?.tests).toEqual([]);
+  });
+
+  it("maps SwiftPM executable targets, libraries, tests, and Swift defaults", async () => {
+    const root = await fixtureRoot("clawpatch-swift-map-");
+    await writeFixture(
+      root,
+      "Package.swift",
+      `// swift-tools-version: 6.0
+import PackageDescription
+let package = Package(
+  name: "SwiftFixture",
+  targets: [
+    .executableTarget(name: "Tool"),
+    .target(name: "Core"),
+    .testTarget(name: "CoreTests", dependencies: ["Core"])
+  ]
+)
+`,
+    );
+    await writeFixture(
+      root,
+      "Sources/Tool/Tool.swift",
+      "@main\nstruct Tool { static func main() {} }\n",
+    );
+    await writeFixture(root, "Sources/Core/Core.swift", "public struct Core {}\n");
+    await writeFixture(
+      root,
+      "Tests/CoreTests/CoreTests.swift",
+      "import Testing\n@Test func works() {}\n",
+    );
+    await writeFixture(
+      root,
+      "Tests/OtherTests/OtherTests.swift",
+      "import Testing\n@Test func unrelated() {}\n",
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(project.detected.languages).toContain("swift");
+    expect(project.detected.packageManagers).toContain("swiftpm");
+    expect(project.detected.commands.typecheck).toBe("swift build");
+    expect(project.detected.commands.test).toBe("swift test");
+    expect(titles).toContain("Swift executable Tool");
+    expect(titles).toContain("Swift target Core");
+    expect(titles).toContain("Swift test suite CoreTests");
+    expect(titles).toContain("Swift test suite OtherTests");
+    expect(result.features.find((feature) => feature.title === "Swift target Core")?.tests).toEqual(
+      [{ path: "Tests/CoreTests/CoreTests.swift", command: "swift test" }],
+    );
+  });
+
+  it("ignores commented SwiftPM target declarations", async () => {
+    const root = await fixtureRoot("clawpatch-swift-comments-");
+    await writeFixture(
+      root,
+      "Package.swift",
+      `// swift-tools-version: 6.0
+import PackageDescription
+let package = Package(
+  name: "Comments",
+  targets: [
+    // .target(name: "Old"),
+    /* .target(name: "BlockOld"), */
+    /*
+      disabled:
+      /* nested */
+      .target(name: "NestedOld"),
+    */
+    .target(name: "Core")
+  ]
+)
+`,
+    );
+    await writeFixture(root, "Sources/Old/Old.swift", "public struct Old {}\n");
+    await writeFixture(root, "Sources/BlockOld/BlockOld.swift", "public struct BlockOld {}\n");
+    await writeFixture(root, "Sources/NestedOld/NestedOld.swift", "public struct NestedOld {}\n");
+    await writeFixture(root, "Sources/Core/Core.swift", "public struct Core {}\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(titles).toContain("Swift target Core");
+    expect(titles).not.toContain("Swift target Old");
+    expect(titles).not.toContain("Swift target BlockOld");
+    expect(titles).not.toContain("Swift target NestedOld");
+  });
+
+  it("ignores commented and string Swift main attributes", async () => {
+    const root = await fixtureRoot("clawpatch-swift-main-comments-");
+    await writeFixture(
+      root,
+      "Package.swift",
+      `// swift-tools-version: 6.0
+import PackageDescription
+let package = Package(name: "MainComments", targets: [.target(name: "Core")])
+`,
+    );
+    await writeFixture(
+      root,
+      "Sources/Core/Core.swift",
+      `/// Used by @main executables.
+public struct Core {
+  let marker = "@main"
+}
+`,
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const feature = result.features.find((candidate) => candidate.title === "Swift target Core");
+
+    expect(feature?.kind).toBe("library");
+    expect(feature?.entrypoints[0]?.command).toBeNull();
+  });
+
+  it("uses manifest target names for SwiftPM custom paths", async () => {
+    const root = await fixtureRoot("clawpatch-swift-custom-path-");
+    await writeFixture(
+      root,
+      "Package.swift",
+      `// swift-tools-version: 6.0
+import PackageDescription
+let package = Package(
+  name: "CustomPath",
+  targets: [
+    .target(name: "Core", dependencies: [.target(name: "Util")], path: "Sources/Shared"),
+    .target(name: "Util"),
+    .testTarget(name: "CoreTests", dependencies: ["Core"], path: "CustomTests/CoreTests")
+  ]
+)
+`,
+    );
+    await writeFixture(root, "Sources/Shared/Core.swift", "public struct Core {}\n");
+    await writeFixture(root, "Sources/Util/Util.swift", "public struct Util {}\n");
+    await writeFixture(
+      root,
+      "CustomTests/CoreTests/CoreTests.swift",
+      "import Testing\n@Test func works() {}\n",
+    );
+    await writeFixture(
+      root,
+      "Tests/SharedTests/SharedTests.swift",
+      "import Testing\n@Test func unrelated() {}\n",
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(titles).toContain("Swift target Core");
+    expect(titles).toContain("Swift target Util");
+    expect(titles).not.toContain("Swift target Shared");
+    expect(result.features.find((feature) => feature.title === "Swift target Core")?.tests).toEqual(
+      [{ path: "CustomTests/CoreTests/CoreTests.swift", command: "swift test" }],
+    );
+  });
+
+  it("links SwiftPM tests from arbitrary manifest test paths", async () => {
+    const root = await fixtureRoot("clawpatch-swift-specs-path-");
+    await writeFixture(
+      root,
+      "Package.swift",
+      `// swift-tools-version: 6.0
+import PackageDescription
+let package = Package(
+  name: "SpecsPath",
+  targets: [
+    .target(name: "Core"),
+    .testTarget(name: "CoreTests", dependencies: ["Core"], path: "Specs")
+  ]
+)
+`,
+    );
+    await writeFixture(root, "Sources/Core/Core.swift", "public struct Core {}\n");
+    await writeFixture(root, "Specs/CoreTests.swift", "import Testing\n@Test func works() {}\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+
+    expect(result.features.find((feature) => feature.title === "Swift target Core")?.tests).toEqual(
+      [{ path: "Specs/CoreTests.swift", command: "swift test" }],
+    );
+    expect(
+      result.features.find((feature) => feature.title === "Swift test suite CoreTests")
+        ?.entrypoints[0]?.path,
+    ).toBe("Specs/CoreTests.swift");
+  });
+
+  it("links custom SwiftPM test targets by dependency", async () => {
+    const root = await fixtureRoot("clawpatch-swift-custom-test-name-");
+    await writeFixture(
+      root,
+      "Package.swift",
+      `// swift-tools-version: 6.0
+import PackageDescription
+let package = Package(
+  name: "CustomTestName",
+  targets: [
+    .target(name: "Core"),
+    .testTarget(
+      name: "UnitSpecs",
+      dependencies: [
+        .product(name: "FixtureSupport", package: "fixture", condition: .when(platforms: [.macOS])),
+        "Core"
+      ],
+      path: "Specs"
+    )
+  ]
+)
+`,
+    );
+    await writeFixture(root, "Sources/Core/Core.swift", "public struct Core {}\n");
+    await writeFixture(root, "Specs/CoreSpec.swift", "import Testing\n@Test func works() {}\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+
+    expect(result.features.find((feature) => feature.title === "Swift target Core")?.tests).toEqual(
+      [{ path: "Specs/CoreSpec.swift", command: "swift test" }],
+    );
+  });
+
+  it("does not link SwiftPM external product names as local target dependencies", async () => {
+    const root = await fixtureRoot("clawpatch-swift-external-product-name-");
+    await writeFixture(
+      root,
+      "Package.swift",
+      `// swift-tools-version: 6.0
+import PackageDescription
+let package = Package(
+  name: "ExternalProductName",
+  targets: [
+    .target(name: "Core"),
+    .testTarget(
+      name: "ExternalSpecs",
+      dependencies: [
+        .product(name: "Core", package: "external-core")
+      ],
+      path: "ExternalSpecs"
+    )
+  ]
+)
+`,
+    );
+    await writeFixture(root, "Sources/Core/Core.swift", "public struct Core {}\n");
+    await writeFixture(
+      root,
+      "ExternalSpecs/ExternalSpec.swift",
+      "import Testing\n@Test func works() {}\n",
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+
+    expect(result.features.find((feature) => feature.title === "Swift target Core")?.tests).toEqual(
+      [],
+    );
+  });
+
+  it("links custom SwiftPM test targets at default test paths", async () => {
+    const root = await fixtureRoot("clawpatch-swift-default-custom-test-name-");
+    await writeFixture(
+      root,
+      "Package.swift",
+      `// swift-tools-version: 6.0
+import PackageDescription
+let package = Package(
+  name: "DefaultCustomTestName",
+  targets: [
+    .target(name: "Core"),
+    .testTarget(name: "UnitSpecs", dependencies: ["Core"])
+  ]
+)
+`,
+    );
+    await writeFixture(root, "Sources/Core/Core.swift", "public struct Core {}\n");
+    await writeFixture(
+      root,
+      "Tests/UnitSpecs/UnitSpecs.swift",
+      "import Testing\n@Test func works() {}\n",
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+
+    expect(result.features.find((feature) => feature.title === "Swift target Core")?.tests).toEqual(
+      [{ path: "Tests/UnitSpecs/UnitSpecs.swift", command: "swift test" }],
+    );
+  });
+
+  it("maps SwiftPM targets with root custom paths", async () => {
+    const root = await fixtureRoot("clawpatch-swift-root-path-");
+    await writeFixture(
+      root,
+      "Package.swift",
+      `// swift-tools-version: 6.0
+import PackageDescription
+let package = Package(
+  name: "RootPath",
+  targets: [
+    .executableTarget(name: "Tool", path: "."),
+    .testTarget(name: "ToolTests", dependencies: ["Tool"])
+  ]
+)
+`,
+    );
+    await writeFixture(root, "main.swift", 'print("hi")\n');
+    await writeFixture(root, "A.swift", "struct Helper {}\n");
+    await writeFixture(
+      root,
+      "Tests/ToolTests/ToolTests.swift",
+      "import Testing\n@Test func ok() {}\n",
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const feature = result.features.find(
+      (candidate) => candidate.title === "Swift executable Tool",
+    );
+
+    expect(feature?.entrypoints[0]?.path).toBe("main.swift");
+    expect(feature?.tests).toEqual([
+      { path: "Tests/ToolTests/ToolTests.swift", command: "swift test" },
+    ]);
+    expect(result.features.map((candidate) => candidate.title)).toContain(
+      "Swift test suite ToolTests",
+    );
+  });
+
+  it("handles SwiftPM root test paths with source filters", async () => {
+    const root = await fixtureRoot("clawpatch-swift-root-test-path-");
+    await writeFixture(
+      root,
+      "Package.swift",
+      `// swift-tools-version: 6.0
+import PackageDescription
+let package = Package(
+  name: "RootTestPath",
+  targets: [
+    .target(name: "Core"),
+    .testTarget(
+      name: "CoreTests",
+      dependencies: ["Core"],
+      path: ".",
+      sources: ["Tests/CoreTests"]
+    )
+  ]
+)
+`,
+    );
+    await writeFixture(root, "Sources/Core/Core.swift", "public struct Core {}\n");
+    await writeFixture(
+      root,
+      "Tests/CoreTests/CoreTests.swift",
+      "import Testing\n@Test func ok() {}\n",
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(titles).toContain("Swift target Core");
+    expect(titles).toContain("Swift test suite CoreTests");
+    expect(titles).not.toContain("Swift test suite Core");
+    expect(result.features.find((feature) => feature.title === "Swift target Core")?.tests).toEqual(
+      [{ path: "Tests/CoreTests/CoreTests.swift", command: "swift test" }],
+    );
+  });
+
+  it("ignores SwiftPM custom paths that escape the repo", async () => {
+    const root = await fixtureRoot("clawpatch-swift-escape-");
+    await writeFixture(
+      root,
+      "Package.swift",
+      `// swift-tools-version: 6.0
+import PackageDescription
+let package = Package(
+  name: "Escape",
+  targets: [
+    .executableTarget(name: "Tool", path: "../outside")
+  ]
+)
+`,
+    );
+    await writeFixture(
+      root,
+      "../outside/main.swift",
+      "@main\nstruct Tool { static func main() {} }\n",
+    );
+    await writeFixture(root, "Sources/Tool/main.swift", 'print("fallback must not map")\n');
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+    const paths = result.features.flatMap((feature) =>
+      feature.entrypoints.map((entrypoint) => entrypoint.path),
+    );
+
+    expect(titles).not.toContain("Swift executable Tool");
+    expect(paths.some((path) => path.startsWith("../"))).toBe(false);
+  });
+
+  it("ignores SwiftPM custom paths through symlinks outside the repo", async () => {
+    const root = await fixtureRoot("clawpatch-swift-symlink-path-");
+    const external = await fixtureRoot("clawpatch-swift-external-path-");
+    await writeFixture(
+      root,
+      "Package.swift",
+      `// swift-tools-version: 6.0
+import PackageDescription
+let package = Package(
+  name: "SymlinkPath",
+  targets: [
+    .target(name: "Outside", path: "linked/src")
+  ]
+)
+`,
+    );
+    await writeFixture(external, "src/Outside.swift", "public struct Outside {}\n");
+    await symlink(external, join(root, "linked"), "dir");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+    const paths = result.features.flatMap((feature) =>
+      feature.entrypoints.map((entrypoint) => entrypoint.path),
+    );
+
+    expect(titles).not.toContain("Swift target Outside");
+    expect(paths.some((path) => path.startsWith("../"))).toBe(false);
+  });
+
+  it("does not seed swift test when a SwiftPM package has no tests", async () => {
+    const root = await fixtureRoot("clawpatch-swift-no-tests-");
+    await writeFixture(
+      root,
+      "Package.swift",
+      `// swift-tools-version: 6.0
+import PackageDescription
+let package = Package(name: "NoTests", targets: [.executableTarget(name: "NoTests")])
+// .testTarget(name: "OldTests")
+/*
+  disabled:
+  /* nested */
+  .testTarget(name: "BlockOldTests")
+*/
+`,
+    );
+    await writeFixture(root, "Tests/fixtures/data.json", "{}\n");
+    await writeFixture(
+      root,
+      "Sources/NoTests/NoTests.swift",
+      "@main\nstruct NoTests { static func main() {} }\n",
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const feature = result.features.find(
+      (candidate) => candidate.title === "Swift executable NoTests",
+    );
+
+    expect(project.detected.commands.typecheck).toBe("swift build");
+    expect(project.detected.commands.test).toBeNull();
+    expect(feature?.tests).toEqual([]);
+  });
+
+  it("ignores symlinked SwiftPM test directories", async () => {
+    const root = await fixtureRoot("clawpatch-swift-symlink-tests-");
+    const external = await fixtureRoot("clawpatch-swift-external-tests-");
+    await writeFixture(
+      root,
+      "Package.swift",
+      `// swift-tools-version: 6.0
+import PackageDescription
+let package = Package(name: "NoTests", targets: [.executableTarget(name: "NoTests")])
+`,
+    );
+    await writeFixture(root, "Sources/NoTests/main.swift", 'print("hi")\n');
+    await writeFixture(
+      external,
+      "NoTestsTests/NoTestsTests.swift",
+      "import Testing\n@Test func ok() {}\n",
+    );
+    await symlink(external, join(root, "Tests"), "dir");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const feature = result.features.find(
+      (candidate) => candidate.title === "Swift executable NoTests",
+    );
+
+    expect(project.detected.commands.test).toBeNull();
+    expect(feature?.tests).toEqual([]);
+  });
+
+  it("uses manifest target names for flat SwiftPM source layouts", async () => {
+    const root = await fixtureRoot("clawpatch-swift-flat-");
+    await writeFixture(
+      root,
+      "Package.swift",
+      `// swift-tools-version: 6.0
+import PackageDescription
+let package = Package(
+  name: "Flat",
+  targets: [
+    .executableTarget(name: "Flat"),
+    .testTarget(name: "FlatTests", dependencies: ["Flat"])
+  ]
+)
+`,
+    );
+    await writeFixture(root, "Sources/main.swift", 'print("flat")\n');
+    await writeFixture(
+      root,
+      "Tests/FlatTests/FlatTests.swift",
+      "import Testing\n@Test func ok() {}\n",
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const feature = result.features.find(
+      (candidate) => candidate.title === "Swift executable Flat",
+    );
+
+    expect(feature).toBeDefined();
+    expect(feature?.entrypoints[0]?.command).toBe("Flat");
+    expect(feature?.entrypoints[0]?.path).toBe("Sources/main.swift");
+    expect(feature?.tests).toEqual([
+      { path: "Tests/FlatTests/FlatTests.swift", command: "swift test" },
+    ]);
+  });
+
+  it("preserves SwiftPM source targets declared under Tests", async () => {
+    const root = await fixtureRoot("clawpatch-swift-test-helper-target-");
+    await writeFixture(
+      root,
+      "Package.swift",
+      `// swift-tools-version: 6.0
+import PackageDescription
+let package = Package(
+  name: "TestHelper",
+  targets: [
+    .target(name: "TestResources", path: "Tests/TestResources"),
+    .testTarget(
+      name: "CoreTests",
+      dependencies: ["TestResources"],
+      path: "Tests/CoreTests"
+    )
+  ]
+)
+`,
+    );
+    await writeFixture(
+      root,
+      "Tests/TestResources/Resources.swift",
+      "public struct TestResources {}\n",
+    );
+    await writeFixture(
+      root,
+      "Tests/CoreTests/CoreTests.swift",
+      "import Testing\n@Test func ok() {}\n",
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(titles).toContain("Swift target TestResources");
+    expect(titles).not.toContain("Swift test suite TestResources");
+    expect(
+      result.features.find((feature) => feature.title === "Swift target TestResources")?.tests,
+    ).toEqual([{ path: "Tests/CoreTests/CoreTests.swift", command: "swift test" }]);
+  });
+
+  it("preserves SwiftPM targets sharing a path with sources filters", async () => {
+    const root = await fixtureRoot("clawpatch-swift-shared-source-path-");
+    await writeFixture(
+      root,
+      "Package.swift",
+      `// swift-tools-version: 6.0
+import PackageDescription
+let package = Package(
+  name: "SharedPath",
+  targets: [
+    .target(name: "Core", path: "Sources", sources: ["Core"]),
+    .target(name: "Util", path: "Sources", sources: ["Util"]),
+    .testTarget(
+      name: "CoreTests",
+      dependencies: ["Core"],
+      path: "Tests",
+      sources: ["CoreTests"]
+    ),
+    .testTarget(
+      name: "UtilTests",
+      dependencies: ["Util"],
+      path: "Tests",
+      sources: ["UtilTests"]
+    )
+  ]
+)
+`,
+    );
+    await writeFixture(root, "Sources/Core/Core.swift", "public struct Core {}\n");
+    await writeFixture(root, "Sources/Util/Util.swift", "public struct Util {}\n");
+    await writeFixture(
+      root,
+      "Tests/CoreTests/CoreTests.swift",
+      "import Testing\n@Test func core() {}\n",
+    );
+    await writeFixture(
+      root,
+      "Tests/UtilTests/UtilTests.swift",
+      "import Testing\n@Test func util() {}\n",
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const core = result.features.find((feature) => feature.title === "Swift target Core");
+    const util = result.features.find((feature) => feature.title === "Swift target Util");
+
+    expect(core?.entrypoints[0]?.path).toBe("Sources/Core/Core.swift");
+    expect(util?.entrypoints[0]?.path).toBe("Sources/Util/Util.swift");
+    expect(core?.tests).toEqual([
+      { path: "Tests/CoreTests/CoreTests.swift", command: "swift test" },
+    ]);
+    expect(util?.tests).toEqual([
+      { path: "Tests/UtilTests/UtilTests.swift", command: "swift test" },
+    ]);
+  });
+
+  it("maps SwiftPM source filters that point at files", async () => {
+    const root = await fixtureRoot("clawpatch-swift-file-source-");
+    await writeFixture(
+      root,
+      "Package.swift",
+      `// swift-tools-version: 6.0
+import PackageDescription
+let package = Package(
+  name: "FileSource",
+  targets: [
+    .target(name: "Core", path: "Sources", sources: ["Core.swift"])
+  ]
+)
+`,
+    );
+    await writeFixture(root, "Sources/Core.swift", "public struct Core {}\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const core = result.features.find((feature) => feature.title === "Swift target Core");
+
+    expect(core?.entrypoints[0]?.path).toBe("Sources/Core.swift");
   });
 });

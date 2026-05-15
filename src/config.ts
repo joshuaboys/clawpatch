@@ -27,7 +27,15 @@ export function defaultConfig(): ClawpatchConfig {
     schemaVersion: 1,
     stateDir: ".clawpatch",
     include: ["**/*"],
-    exclude: ["node_modules/**", "dist/**", "build/**", ".git/**", ".clawpatch/**"],
+    exclude: [
+      "node_modules/**",
+      "dist/**",
+      "build/**",
+      "target/**",
+      ".build/**",
+      ".git/**",
+      ".clawpatch/**",
+    ],
     provider: {
       name: "codex",
       model: null,

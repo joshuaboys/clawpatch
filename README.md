@@ -46,10 +46,12 @@ validation commands and records a patch attempt under `.clawpatch/`.
 - Next.js `app/` and `pages/` routes
 - Go `cmd/*/main.go` commands
 - Go `internal/*` package slices
+- Rust `src/main.rs`, `src/bin/*.rs`, `src/lib.rs`, `crates/*`, and
+  `tests/*.rs`
+- SwiftPM `Sources/*` targets and `Tests/*` suites
 - common project config files
 
-Swift, Rust, deeper framework mappers, and agent-assisted enrichment are next
-steps.
+Deeper framework mappers and agent-assisted enrichment are next steps.
 
 ## Provider
 
