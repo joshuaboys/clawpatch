@@ -52,6 +52,25 @@ describe("mapFeatures", () => {
     ).toEqual([]);
   });
 
+  it("maps generated package bins back to source entries", async () => {
+    const root = await fixtureRoot("clawpatch-map-bin-source-");
+    await writeFixture(
+      root,
+      "package.json",
+      JSON.stringify({ name: "fixture-cli", bin: { fixture: "./dist/cli.js" } }, null, 2),
+    );
+    await writeFixture(root, "dist/cli.js", "#!/usr/bin/env node\n");
+    await writeFixture(root, "src/cli.ts", "export function main() {}\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const cli = result.features.find((feature) => feature.title === "CLI command fixture");
+
+    expect(cli?.entrypoints[0]?.path).toBe("src/cli.ts");
+    expect(cli?.ownedFiles).toContainEqual({ path: "src/cli.ts", reason: "entrypoint" });
+    expect(cli?.summary).toContain("source src/cli.ts");
+  });
+
   it("maps Go commands and internal packages", async () => {
     const root = await fixtureRoot("clawpatch-go-map-");
     await writeFixture(root, "go.mod", "module example.com/tool\n\ngo 1.26\n");

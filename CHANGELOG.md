@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Fixed unsupported command-specific flags being accepted and ignored by commands that do not implement them.
+- Fixed package bin mapping so generated `dist`/`build` entries prefer matching TypeScript source files.
 
 ## 0.1.0 - 2026-05-15
 
