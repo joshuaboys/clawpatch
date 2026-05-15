@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fixed unsupported command-specific flags being accepted and ignored by commands that do not implement them.
+
 ## 0.1.0 - 2026-05-15
 
 - Added the initial strict TypeScript `clawpatch` CLI scaffold with `init`, `map`, `status`, `review`, `report`, `fix`, `revalidate`, `doctor`, and `clean-locks`.

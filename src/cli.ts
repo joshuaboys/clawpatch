@@ -152,7 +152,36 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (command === "") {
     command = "status";
   }
+  validateCommandFlags(command, flags);
   return { command, flags, global, help: false, version: false };
+}
+
+const commandFlags = {
+  init: new Set(["force"]),
+  map: new Set(["dryRun"]),
+  status: new Set<string>(),
+  review: new Set(["feature", "limit", "jobs", "provider", "model", "dryRun"]),
+  report: new Set(["status", "severity", "feature", "category", "triage", "output"]),
+  fix: new Set(["finding", "provider", "model", "dryRun"]),
+  revalidate: new Set(["finding", "provider", "model"]),
+  doctor: new Set<string>(),
+  "clean-locks": new Set<string>(),
+} satisfies Record<string, Set<string>>;
+
+function validateCommandFlags(command: string, flags: Record<string, string | boolean>): void {
+  const allowed = commandFlags[command as keyof typeof commandFlags];
+  if (allowed === undefined) {
+    return;
+  }
+  for (const flag of Object.keys(flags)) {
+    if (!allowed.has(flag)) {
+      throw new ClawpatchError(
+        `unsupported flag for ${command}: --${kebab(flag)}`,
+        2,
+        "invalid-usage",
+      );
+    }
+  }
 }
 
 function isBooleanFlag(name: string): boolean {
@@ -194,6 +223,10 @@ function isGlobalFlag(name: string): name is keyof GlobalOptions {
 
 function camel(value: string): string {
   return value.replace(/-([a-z])/gu, (_match, letter: string) => letter.toUpperCase());
+}
+
+function kebab(value: string): string {
+  return value.replace(/[A-Z]/gu, (letter) => `-${letter.toLowerCase()}`);
 }
 
 function writeResult(result: unknown, options: GlobalOptions): void {

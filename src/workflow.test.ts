@@ -33,6 +33,21 @@ describe("workflow", () => {
     expect(() => parseArgs(["fix", "--finding", "f", "--dryrun"])).toThrow("unknown arg");
   });
 
+  it("rejects unsupported command flags instead of ignoring them", () => {
+    expect(() => parseArgs(["clean-locks", "--dry-run"])).toThrow(
+      "unsupported flag for clean-locks: --dry-run",
+    );
+    expect(() => parseArgs(["--dry-run", "clean-locks"])).toThrow(
+      "unsupported flag for clean-locks: --dry-run",
+    );
+    expect(parseArgs(["map", "--dry-run"]).flags).toMatchObject({ dryRun: true });
+    expect(parseArgs(["review", "--dry-run"]).flags).toMatchObject({ dryRun: true });
+    expect(parseArgs(["fix", "--finding", "f", "--dry-run"]).flags).toMatchObject({
+      dryRun: true,
+      finding: "f",
+    });
+  });
+
   it("parses review jobs and report filters", () => {
     expect(parseArgs(["review", "--limit", "4", "--jobs", "3"]).flags).toMatchObject({
       limit: "4",
