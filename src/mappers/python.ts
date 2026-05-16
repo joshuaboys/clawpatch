@@ -221,15 +221,11 @@ function fastApiRoutesInFile(
   const routerPrefixes = apiRouterPrefixes(source);
   const routerMountPrefixes = prefixes.routerMountPrefixesByFile.get(file) ?? new Map();
   const acceptedReceivers = prefixes.fastApiReceiversByFile.get(file) ?? new Set();
-  for (let index = 0; index < lines.length; index += 1) {
-    const decorator = fastApiDecorator(lines[index] ?? "");
-    if (decorator === null) {
-      continue;
-    }
+  for (const decorator of fastApiDecorators(source)) {
     if (!acceptedReceivers.has(decorator.receiver)) {
       continue;
     }
-    const functionName = nextFunctionName(lines, index + 1);
+    const functionName = nextFunctionName(lines, decorator.lineIndex + 1);
     if (functionName === null) {
       continue;
     }
@@ -249,7 +245,9 @@ function fastApiRoutesInFile(
 
 function apiRouterPrefixes(source: string): Map<string, string> {
   const prefixes = new Map<string, string>();
-  for (const match of source.matchAll(/\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*APIRouter\(/gu)) {
+  for (const match of source.matchAll(
+    /\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:fastapi\.)?APIRouter\(/gu,
+  )) {
     const receiver = match[1];
     const openParenIndex = match.index + match[0].length - 1;
     const args = readPythonCallArgs(source, openParenIndex);
@@ -264,7 +262,7 @@ function apiRouterPrefixes(source: string): Map<string, string> {
 function fastApiReceivers(source: string): Set<string> {
   const receivers = new Set<string>();
   for (const match of source.matchAll(
-    /\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:FastAPI|APIRouter)\(/gu,
+    /\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:fastapi\.)?(?:FastAPI|APIRouter)\(/gu,
   )) {
     const receiver = match[1];
     if (receiver !== undefined) {
@@ -274,16 +272,29 @@ function fastApiReceivers(source: string): Set<string> {
   return receivers;
 }
 
-function fastApiDecorator(line: string): { receiver: string; method: string; path: string } | null {
+function fastApiDecorators(
+  source: string,
+): Array<{ receiver: string; method: string; path: string; lineIndex: number }> {
+  const decorators: Array<{ receiver: string; method: string; path: string; lineIndex: number }> =
+    [];
   const methods = fastApiMethods.join("|");
-  const match = new RegExp(
-    `^\\s*@([A-Za-z_][A-Za-z0-9_]*)\\.(${methods})\\(\\s*(["'])([^"']*)\\3`,
-    "u",
-  ).exec(line);
-  if (match?.[1] === undefined || match[2] === undefined || match[4] === undefined) {
-    return null;
+  const pattern = new RegExp(`@([A-Za-z_][A-Za-z0-9_]*)\\.(${methods})\\(`, "gu");
+  for (const match of source.matchAll(pattern)) {
+    const receiver = match[1];
+    const method = match[2];
+    const openParenIndex = match.index + match[0].length - 1;
+    const args = readPythonCallArgs(source, openParenIndex);
+    const path = /^\s*(["'])([^"']*)\1/u.exec(args)?.[2];
+    if (receiver !== undefined && method !== undefined && path !== undefined) {
+      decorators.push({
+        receiver,
+        method,
+        path,
+        lineIndex: source.slice(0, match.index).split("\n").length - 1,
+      });
+    }
   }
-  return { receiver: match[1], method: match[2], path: match[4] };
+  return decorators;
 }
 
 function nextFunctionName(lines: string[], start: number): string | null {
@@ -293,7 +304,9 @@ function nextFunctionName(lines: string[], start: number): string | null {
       continue;
     }
     const match = /^\s*(?:async\s+)?def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/u.exec(line);
-    return match?.[1] ?? null;
+    if (match?.[1] !== undefined) {
+      return match[1];
+    }
   }
   return null;
 }

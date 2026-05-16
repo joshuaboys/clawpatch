@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { lstat, readFile } from "node:fs/promises";
+import { lstat, readFile, readdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { pathExists } from "../fs.js";
 import {
@@ -202,7 +202,97 @@ async function packageJsonPaths(root: string): Promise<string[]> {
   )) {
     paths.add(path);
   }
+  for (const path of await workspacePackageJsonPaths(root)) {
+    paths.add(path);
+  }
   return [...paths].toSorted();
+}
+
+async function workspacePackageJsonPaths(root: string): Promise<string[]> {
+  const patterns = new Set<string>();
+  const rootPackage = await readPackageJsonAt(root, "package.json");
+  if (rootPackage !== null) {
+    for (const pattern of packageWorkspacePatterns(rootPackage)) {
+      patterns.add(pattern);
+    }
+  }
+  if (await pathExists(join(root, "pnpm-workspace.yaml"))) {
+    for (const pattern of parsePnpmWorkspace(
+      await readFile(join(root, "pnpm-workspace.yaml"), "utf8"),
+    )) {
+      patterns.add(pattern);
+    }
+  }
+  const paths: string[] = [];
+  for (const pattern of patterns) {
+    for (const packageRoot of await expandWorkspacePattern(root, pattern)) {
+      paths.push(packageRelativePath(packageRoot, "package.json"));
+    }
+  }
+  return paths;
+}
+
+function packageWorkspacePatterns(pkg: PackageJson): string[] {
+  const workspaces = (pkg as { workspaces?: unknown }).workspaces;
+  if (Array.isArray(workspaces)) {
+    return workspaces.filter((entry): entry is string => typeof entry === "string");
+  }
+  if (
+    typeof workspaces === "object" &&
+    workspaces !== null &&
+    Array.isArray((workspaces as { packages?: unknown }).packages)
+  ) {
+    return (workspaces as { packages: unknown[] }).packages.filter(
+      (entry): entry is string => typeof entry === "string",
+    );
+  }
+  return [];
+}
+
+function parsePnpmWorkspace(source: string): string[] {
+  const patterns: string[] = [];
+  let inPackages = false;
+  for (const rawLine of source.split("\n")) {
+    const line = rawLine.replace(/#.*/u, "");
+    if (/^\S/u.test(line)) {
+      inPackages = /^packages\s*:/u.test(line);
+    }
+    if (!inPackages) {
+      continue;
+    }
+    const match = /^\s*-\s*["']?([^"'\s]+)["']?\s*$/u.exec(line);
+    if (match?.[1] !== undefined) {
+      patterns.push(match[1]);
+    }
+  }
+  return patterns;
+}
+
+async function expandWorkspacePattern(root: string, pattern: string): Promise<string[]> {
+  const normalized = normalize(pattern)
+    .replace(/\/package\.json$/u, "")
+    .replace(/\/$/u, "");
+  if (normalized.startsWith("/") || normalized.split("/").includes("..")) {
+    return [];
+  }
+  if (normalized.endsWith("/*")) {
+    const parent = normalized.slice(0, -2);
+    const entries = await readdir(join(root, parent), { withFileTypes: true }).catch(() => []);
+    const packageRoots = entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => `${parent}/${entry.name}`);
+    const existing: string[] = [];
+    for (const packageRoot of packageRoots) {
+      if (await pathExists(join(root, packageRoot, "package.json"))) {
+        existing.push(packageRoot);
+      }
+    }
+    return existing;
+  }
+  if (normalized.includes("*")) {
+    return [];
+  }
+  return (await pathExists(join(root, normalized, "package.json"))) ? [normalized] : [];
 }
 
 function hasReactDependency(pkg: PackageJson): boolean {

@@ -544,6 +544,35 @@ describe("mapFeatures", () => {
     expect(result.features.map((feature) => feature.title)).not.toContain("React route /custom");
   });
 
+  it("discovers React packages from workspace globs", async () => {
+    const root = await fixtureRoot("clawpatch-react-workspace-glob-");
+    await writeFixture(root, "pnpm-workspace.yaml", "packages:\n  - libs/*\n");
+    await writeFixture(
+      root,
+      "libs/web/package.json",
+      JSON.stringify({ dependencies: { react: "1.0.0", "react-router-dom": "1.0.0" } }, null, 2),
+    );
+    await writeFixture(
+      root,
+      "libs/web/src/App.tsx",
+      [
+        "import { Route, Routes } from 'react-router-dom';",
+        "import HomePage from './pages/HomePage';",
+        'export function App() { return <Routes><Route path="/home" element={<HomePage />} /></Routes>; }',
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "libs/web/src/pages/HomePage.tsx",
+      "export default function HomePage() { return null; }\n",
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+
+    expect(result.features.map((feature) => feature.title)).toContain("React route /home");
+  });
+
   it("maps nested SwiftPM, Apple, and Android Gradle app surfaces", async () => {
     const root = await fixtureRoot("clawpatch-native-app-map-");
     await writeFixture(root, "package.json", JSON.stringify({ name: "native-root" }, null, 2));
@@ -1234,9 +1263,12 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
       root,
       "main.py",
       [
-        "from fastapi import FastAPI",
-        "app = FastAPI()",
-        '@app.get("/health")',
+        "import fastapi",
+        "app = fastapi.FastAPI()",
+        "@app.get(",
+        '    "/health",',
+        "    response_model=dict,",
+        ")",
         "def health():",
         "    return {'ok': True}",
       ].join("\n"),
@@ -1259,11 +1291,12 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
       root,
       "main.py",
       [
-        "from fastapi import APIRouter, Depends, FastAPI",
+        "import fastapi",
+        "from fastapi import Depends, FastAPI",
         "def auth():",
         "    return True",
         "app = FastAPI()",
-        'router = APIRouter(dependencies=[Depends(auth)], prefix="/v1")',
+        'router = fastapi.APIRouter(dependencies=[Depends(auth)], prefix="/v1")',
         'app.include_router(router, prefix="/api")',
         '@router.get("/items")',
         "def items():",
