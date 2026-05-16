@@ -398,22 +398,25 @@ describe("mapFeatures", () => {
       root,
       "frontend/src/App.tsx",
       [
-        "import { lazy } from 'react';",
+        "import { lazy, Suspense } from 'react';",
         "import { Navigate, Route, Routes } from 'react-router-dom';",
         "const CasesPage = lazy(() => import('./pages/CasesPage'));",
         "import HomePage from './pages/HomePage';",
         "import ReportsPage from './pages/ReportsPage';",
         "import SettingsPage from './pages/SettingsPage';",
+        "import SuspensePage from './pages/SuspensePage';",
         "import UserPage from './pages/UserPage';",
         "import EscapePage from '../../../outside';",
         "export default function App() {",
         "  return <Routes>",
+        '    {/* <Route path="/old" element={<OldPage />} /> */}',
         "    <Route index element={<HomePage />} />",
         '    <Route path="/" element={<Navigate to="/cases" replace />} />',
         '    <Route path="/cases" element={<CasesPage />} />',
         '    <Route path="/users">',
         '      <Route path=":id" element={<UserPage />} />',
         "    </Route>",
+        '    <Route path="/suspense" element={<Suspense><SuspensePage /></Suspense>} />',
         '    <Route element={<ReportsPage />} path="/reports" />',
         '    <Route path="/settings" element={<SettingsPage />} />',
         '    <Route path="/escape" element={<EscapePage />} />',
@@ -460,6 +463,11 @@ describe("mapFeatures", () => {
     );
     await writeFixture(
       root,
+      "frontend/src/pages/SuspensePage.tsx",
+      "export default function SuspensePage() { return null; }\n",
+    );
+    await writeFixture(
+      root,
       "frontend/src/pages/ReportsPage.tsx",
       "export default function ReportsPage() { return null; }\n",
     );
@@ -481,6 +489,7 @@ describe("mapFeatures", () => {
     const cases = result.features.find((feature) => feature.title === "React route /cases");
     const reports = result.features.find((feature) => feature.title === "React route /reports");
     const settings = result.features.find((feature) => feature.title === "React route /settings");
+    const suspense = result.features.find((feature) => feature.title === "React route /suspense");
     const user = result.features.find((feature) => feature.title === "React route /users/:id");
     const escape = result.features.find((feature) => feature.title === "React route /escape");
     const dialog = result.features.find((feature) => feature.title === "React component Dialog");
@@ -501,8 +510,10 @@ describe("mapFeatures", () => {
     ]);
     expect(reports?.entrypoints[0]?.path).toBe("frontend/src/pages/ReportsPage.tsx");
     expect(settings?.entrypoints[0]?.path).toBe("frontend/src/pages/SettingsPage.tsx");
+    expect(suspense?.entrypoints[0]?.path).toBe("frontend/src/App.tsx");
     expect(user?.entrypoints[0]?.path).toBe("frontend/src/pages/UserPage.tsx");
     expect(escape?.entrypoints[0]?.path).toBe("frontend/src/App.tsx");
+    expect(titles).not.toContain("React route /old");
     expect(titles).not.toContain("React route /test-only");
     expect(dialog?.source).toBe("react-component");
     expect(dialog?.ownedFiles).toEqual([
@@ -1248,9 +1259,11 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
       root,
       "main.py",
       [
-        "from fastapi import APIRouter, FastAPI",
+        "from fastapi import APIRouter, Depends, FastAPI",
+        "def auth():",
+        "    return True",
         "app = FastAPI()",
-        'router = APIRouter(prefix="/v1")',
+        'router = APIRouter(dependencies=[Depends(auth)], prefix="/v1")',
         'app.include_router(router, prefix="/api")',
         '@router.get("/items")',
         "def items():",

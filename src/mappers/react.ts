@@ -123,7 +123,7 @@ async function routeSeeds(root: string, info: ReactPackage): Promise<FeatureSeed
 }
 
 function isFrameworkRouteComponent(component: string): boolean {
-  return new Set(["Navigate", "Outlet", "Fragment", "Suspense"]).has(component);
+  return new Set(["Navigate", "Outlet"]).has(component);
 }
 
 async function componentSeeds(
@@ -254,12 +254,13 @@ function routeMatches(source: string, declarationPath: string): RouteMatch[] {
 function routeDeclarations(source: string): RouteDeclaration[] {
   const routes: RouteDeclaration[] = [];
   const pathStack: string[] = [];
-  for (const match of source.matchAll(/<\/Route\s*>|<Route\b/gu)) {
+  const strippedSource = stripJsxComments(source);
+  for (const match of strippedSource.matchAll(/<\/Route\s*>|<Route\b/gu)) {
     if (match[0].startsWith("</")) {
       pathStack.pop();
       continue;
     }
-    const tag = readRouteTag(source, match.index + "<Route".length);
+    const tag = readRouteTag(strippedSource, match.index + "<Route".length);
     if (tag === null) {
       continue;
     }
@@ -280,6 +281,10 @@ function routeDeclarations(source: string): RouteDeclaration[] {
     }
   }
   return routes;
+}
+
+function stripJsxComments(source: string): string {
+  return source.replace(/\{\/\*[\s\S]*?\*\/\}/gu, "").replace(/\/\*[\s\S]*?\*\//gu, "");
 }
 
 function readRouteTag(

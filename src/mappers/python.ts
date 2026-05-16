@@ -249,9 +249,10 @@ function fastApiRoutesInFile(
 
 function apiRouterPrefixes(source: string): Map<string, string> {
   const prefixes = new Map<string, string>();
-  for (const match of source.matchAll(/\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*APIRouter\(([^)]*)\)/gu)) {
+  for (const match of source.matchAll(/\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*APIRouter\(/gu)) {
     const receiver = match[1];
-    const args = match[2] ?? "";
+    const openParenIndex = match.index + match[0].length - 1;
+    const args = readPythonCallArgs(source, openParenIndex);
     const prefix = /\bprefix\s*=\s*(["'])([^"']*)\1/u.exec(args)?.[2];
     if (receiver !== undefined && prefix !== undefined) {
       prefixes.set(receiver, prefix);
