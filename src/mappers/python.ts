@@ -205,6 +205,7 @@ async function rootPythonAppFiles(root: string): Promise<string[]> {
 function fastApiRoutesInFile(file: string, source: string, prefix: string): FastApiRoute[] {
   const routes: FastApiRoute[] = [];
   const lines = source.split("\n");
+  const routerPrefixes = apiRouterPrefixes(source);
   for (let index = 0; index < lines.length; index += 1) {
     const decorator = fastApiDecorator(lines[index] ?? "");
     if (decorator === null) {
@@ -214,9 +215,10 @@ function fastApiRoutesInFile(file: string, source: string, prefix: string): Fast
     if (functionName === null) {
       continue;
     }
+    const decoratorPrefix = joinRoutePaths(prefix, routerPrefixes.get(decorator.receiver) ?? "");
     routes.push({
       method: decorator.method,
-      path: joinRoutePaths(prefix, decorator.path),
+      path: joinRoutePaths(decoratorPrefix, decorator.path),
       functionName,
       file,
     });
@@ -224,16 +226,29 @@ function fastApiRoutesInFile(file: string, source: string, prefix: string): Fast
   return routes;
 }
 
-function fastApiDecorator(line: string): { method: string; path: string } | null {
+function apiRouterPrefixes(source: string): Map<string, string> {
+  const prefixes = new Map<string, string>();
+  for (const match of source.matchAll(/\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*APIRouter\(([^)]*)\)/gu)) {
+    const receiver = match[1];
+    const args = match[2] ?? "";
+    const prefix = /\bprefix\s*=\s*(["'])([^"']*)\1/u.exec(args)?.[2];
+    if (receiver !== undefined && prefix !== undefined) {
+      prefixes.set(receiver, prefix);
+    }
+  }
+  return prefixes;
+}
+
+function fastApiDecorator(line: string): { receiver: string; method: string; path: string } | null {
   const methods = fastApiMethods.join("|");
   const match = new RegExp(
-    `^\\s*@(?:app|router|api_router)\\.(${methods})\\(\\s*(["'])([^"']*)\\2`,
+    `^\\s*@([A-Za-z_][A-Za-z0-9_]*)\\.(${methods})\\(\\s*(["'])([^"']*)\\3`,
     "u",
   ).exec(line);
-  if (match?.[1] === undefined || match[3] === undefined) {
+  if (match?.[1] === undefined || match[2] === undefined || match[4] === undefined) {
     return null;
   }
-  return { method: match[1], path: match[3] };
+  return { receiver: match[1], method: match[2], path: match[4] };
 }
 
 function nextFunctionName(lines: string[], start: number): string | null {
@@ -353,13 +368,23 @@ function addPythonImportAliases(
     if (importedName === undefined || alias === undefined) {
       continue;
     }
+    const nestedModuleName = appendPythonModuleName(moduleName, importedName);
     const importedFile =
       importedName === "router" || importedName.endsWith("_router")
         ? resolvePythonModuleFile(currentFile, moduleName, sourceFiles)
-        : (resolvePythonModuleFile(currentFile, `${moduleName}.${importedName}`, sourceFiles) ??
+        : (resolvePythonModuleFile(currentFile, nestedModuleName, sourceFiles) ??
           resolvePythonModuleFile(currentFile, moduleName, sourceFiles));
     aliases.set(alias, importedFile ?? currentFile);
   }
+}
+
+function appendPythonModuleName(moduleName: string, importedName: string): string {
+  if (moduleName === ".") {
+    return `.${importedName}`;
+  }
+  return moduleName.endsWith(".")
+    ? `${moduleName}${importedName}`
+    : `${moduleName}.${importedName}`;
 }
 
 function resolvePythonModuleFile(

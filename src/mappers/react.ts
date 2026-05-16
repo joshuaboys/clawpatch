@@ -33,6 +33,11 @@ type RouteMatch = {
   declarationPath: string;
 };
 
+type RouteDeclaration = {
+  path: string;
+  component: string | null;
+};
+
 const routePathPropRe = /\bpath=(["'])(.*?)\1/su;
 const routeElementPropRe = /\belement=\{\s*<([A-Z][A-Za-z0-9_]*)/su;
 const lazyImportRe =
@@ -228,35 +233,69 @@ async function packageTestFiles(root: string, info: ReactPackage): Promise<strin
 
 function routeMatches(source: string, declarationPath: string): RouteMatch[] {
   const routes: RouteMatch[] = [];
-  for (const props of routeTagProps(source)) {
-    const path = routePathPropRe.exec(props)?.[2];
-    const component = routeElementPropRe.exec(props)?.[1];
-    if (path === undefined || component === undefined) {
+  for (const route of routeDeclarations(source)) {
+    if (route.component === null) {
       continue;
     }
-    routes.push({ path, component, declarationPath });
+    routes.push({ path: route.path, component: route.component, declarationPath });
   }
   return routes;
 }
 
-function routeTagProps(source: string): string[] {
-  const props: string[] = [];
-  for (const match of source.matchAll(/<Route\b/gu)) {
-    const start = match.index + "<Route".length;
-    let braceDepth = 0;
-    for (let index = start; index < source.length; index += 1) {
-      const char = source[index];
-      if (char === "{") {
-        braceDepth += 1;
-      } else if (char === "}") {
-        braceDepth = Math.max(0, braceDepth - 1);
-      } else if (char === ">" && braceDepth === 0) {
-        props.push(source.slice(start, index));
-        break;
-      }
+function routeDeclarations(source: string): RouteDeclaration[] {
+  const routes: RouteDeclaration[] = [];
+  const pathStack: string[] = [];
+  for (const match of source.matchAll(/<\/Route\s*>|<Route\b/gu)) {
+    if (match[0].startsWith("</")) {
+      pathStack.pop();
+      continue;
+    }
+    const tag = readRouteTag(source, match.index + "<Route".length);
+    if (tag === null) {
+      continue;
+    }
+    const declaredPath = routePathPropRe.exec(tag.props)?.[2];
+    const parentPath = pathStack.at(-1) ?? "";
+    const path =
+      declaredPath === undefined ? parentPath : joinReactRoutePaths(parentPath, declaredPath);
+    routes.push({ path, component: routeElementPropRe.exec(tag.props)?.[1] ?? null });
+    if (!tag.selfClosing) {
+      pathStack.push(path);
     }
   }
-  return props;
+  return routes;
+}
+
+function readRouteTag(
+  source: string,
+  start: number,
+): { props: string; selfClosing: boolean } | null {
+  let braceDepth = 0;
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "{") {
+      braceDepth += 1;
+    } else if (char === "}") {
+      braceDepth = Math.max(0, braceDepth - 1);
+    } else if (char === ">" && braceDepth === 0) {
+      const props = source.slice(start, index);
+      return { props, selfClosing: props.trimEnd().endsWith("/") };
+    }
+  }
+  return null;
+}
+
+function joinReactRoutePaths(parent: string, child: string): string {
+  if (child.startsWith("/")) {
+    return child;
+  }
+  if (child.length === 0) {
+    return parent.length === 0 ? "/" : parent;
+  }
+  if (parent.length === 0 || parent === "/") {
+    return `/${child.replace(/^\//u, "")}`;
+  }
+  return `${parent.replace(/\/$/u, "")}/${child.replace(/^\//u, "")}`;
 }
 
 function componentImports(root: string, fromPath: string, source: string): Map<string, string> {

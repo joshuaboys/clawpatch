@@ -403,10 +403,14 @@ describe("mapFeatures", () => {
         "const CasesPage = lazy(() => import('./pages/CasesPage'));",
         "import ReportsPage from './pages/ReportsPage';",
         "import SettingsPage from './pages/SettingsPage';",
+        "import UserPage from './pages/UserPage';",
         "export default function App() {",
         "  return <Routes>",
         '    <Route path="/" element={<Navigate to="/cases" replace />} />',
         '    <Route path="/cases" element={<CasesPage />} />',
+        '    <Route path="/users">',
+        '      <Route path=":id" element={<UserPage />} />',
+        "    </Route>",
         '    <Route element={<ReportsPage />} path="/reports" />',
         '    <Route path="/settings" element={<SettingsPage />} />',
         "  </Routes>;",
@@ -436,6 +440,11 @@ describe("mapFeatures", () => {
     );
     await writeFixture(
       root,
+      "frontend/src/pages/UserPage.tsx",
+      "export default function UserPage() { return null; }\n",
+    );
+    await writeFixture(
+      root,
       "frontend/src/components/Dialog.tsx",
       "export default function Dialog() { return null; }\n",
     );
@@ -446,6 +455,7 @@ describe("mapFeatures", () => {
     const cases = result.features.find((feature) => feature.title === "React route /cases");
     const reports = result.features.find((feature) => feature.title === "React route /reports");
     const settings = result.features.find((feature) => feature.title === "React route /settings");
+    const user = result.features.find((feature) => feature.title === "React route /users/:id");
     const dialog = result.features.find((feature) => feature.title === "React component Dialog");
 
     expect(titles).toContain("Node package fixture-frontend");
@@ -464,6 +474,7 @@ describe("mapFeatures", () => {
     ]);
     expect(reports?.entrypoints[0]?.path).toBe("frontend/src/pages/ReportsPage.tsx");
     expect(settings?.entrypoints[0]?.path).toBe("frontend/src/pages/SettingsPage.tsx");
+    expect(user?.entrypoints[0]?.path).toBe("frontend/src/pages/UserPage.tsx");
     expect(dialog?.source).toBe("react-component");
     expect(dialog?.ownedFiles).toEqual([
       { path: "frontend/src/components/Dialog.tsx", reason: "component implementation" },
@@ -1187,9 +1198,11 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
         "from fastapi import FastAPI",
         "from myapp.routes.auth import router as auth_router",
         "from .routes.health import router as health_router",
+        "from . import routes",
         "app = FastAPI()",
         'app.include_router(auth_router, prefix="/api")',
         "app.include_router(health_router)",
+        'app.include_router(routes.router, prefix="/v1")',
       ].join("\n"),
     );
     await writeFixture(
@@ -1197,7 +1210,7 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
       "src/myapp/routes/auth.py",
       [
         "from fastapi import APIRouter",
-        "router = APIRouter()",
+        'router = APIRouter(prefix="/users")',
         '@router.get("/login")',
         "def login():",
         "    return {'ok': True}",
@@ -1214,13 +1227,25 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
         "    return {'ok': True}",
       ].join("\n"),
     );
+    await writeFixture(
+      root,
+      "src/myapp/routes.py",
+      [
+        "from fastapi import APIRouter",
+        "router = APIRouter()",
+        '@router.get("/status")',
+        "def status():",
+        "    return {'ok': True}",
+      ].join("\n"),
+    );
 
     const project = await detectProject(root);
     const result = await mapFeatures(root, project, []);
     const titles = result.features.map((feature) => feature.title);
 
-    expect(titles).toContain("FastAPI route GET /api/login");
+    expect(titles).toContain("FastAPI route GET /api/users/login");
     expect(titles).toContain("FastAPI route GET /ready");
+    expect(titles).toContain("FastAPI route GET /v1/status");
   });
 
   it("resolves Python console scripts and tests from non-src package roots", async () => {
