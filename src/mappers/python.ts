@@ -534,6 +534,12 @@ function isInsidePythonString(source: string, offset: number): boolean {
     } else if (source.slice(index, index + 3) === '"""') {
       quote = '"""';
       index += 2;
+    } else if (char === "#") {
+      const nextNewline = source.indexOf("\n", index + 1);
+      if (nextNewline === -1) {
+        return false;
+      }
+      index = nextNewline;
     } else if (char === "'" || char === '"') {
       quote = char;
     }

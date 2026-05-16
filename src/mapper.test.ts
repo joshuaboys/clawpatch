@@ -1697,6 +1697,34 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
     expect(result.features.map((feature) => feature.title)).not.toContain("FastAPI route GET /old");
   });
 
+  it("ignores quoted text in Python comments while mapping FastAPI routes", async () => {
+    const root = await fixtureRoot("clawpatch-fastapi-comment-quotes-");
+    await writeFixture(
+      root,
+      "pyproject.toml",
+      '[project]\nname = "api"\ndependencies = ["fastapi"]\n',
+    );
+    await writeFixture(
+      root,
+      "main.py",
+      [
+        "from fastapi import FastAPI",
+        "app = FastAPI()",
+        "# don't break parser",
+        '@app.get("/health")',
+        "def health():",
+        "    return {}",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+
+    expect(result.features.map((feature) => feature.title)).toContain(
+      "FastAPI route GET /health",
+    );
+  });
+
   it("applies FastAPI include prefixes from non-app application variables", async () => {
     const root = await fixtureRoot("clawpatch-fastapi-named-app-");
     await writeFixture(
