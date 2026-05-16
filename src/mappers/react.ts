@@ -230,9 +230,7 @@ async function packageJsonPaths(root: string): Promise<string[]> {
       paths.add(packageJsonPath);
     }
   }
-  for (const path of (await walk(root, ["apps", "packages", "frontend", "client", "web"])).filter(
-    (file) => file.endsWith("/package.json") && !isSampleProjectPath(file),
-  )) {
+  for (const path of await fallbackPackageJsonPaths(root)) {
     const packageRoot = dirname(path);
     if (!isExcludedWorkspace(packageRoot, excludes)) {
       paths.add(path);
@@ -242,6 +240,34 @@ async function packageJsonPaths(root: string): Promise<string[]> {
     paths.add(path);
   }
   return [...paths].toSorted();
+}
+
+async function fallbackPackageJsonPaths(root: string): Promise<string[]> {
+  const paths: string[] = [];
+  for (const prefix of ["apps", "packages", "frontend", "client", "web"]) {
+    await collectPackageJsonPaths(root, prefix, 4, paths);
+  }
+  return paths.toSorted();
+}
+
+async function collectPackageJsonPaths(
+  root: string,
+  prefix: string,
+  remainingDepth: number,
+  paths: string[],
+): Promise<void> {
+  if (remainingDepth < 0 || shouldSkip(prefix) || isSampleProjectPath(prefix)) {
+    return;
+  }
+  if (await pathExists(join(root, prefix, "package.json"))) {
+    paths.push(`${prefix}/package.json`);
+  }
+  if (remainingDepth === 0) {
+    return;
+  }
+  for (const entry of await safeDirectoryEntries(root, prefix)) {
+    await collectPackageJsonPaths(root, `${prefix}/${entry}`, remainingDepth - 1, paths);
+  }
 }
 
 async function workspacePatterns(root: string): Promise<string[]> {
@@ -346,6 +372,7 @@ async function expandWorkspacePattern(root: string, pattern: string): Promise<st
 
 function normalizeWorkspacePattern(pattern: string): string | null {
   const normalized = normalize(pattern)
+    .replace(/^\.\//u, "")
     .replace(/\/package\.json$/u, "")
     .replace(/\/$/u, "");
   if (normalized.startsWith("/") || normalized.split("/").includes("..")) {
@@ -485,7 +512,9 @@ async function packageSourceFiles(
       root,
       prefixes.map((prefix) => packageRelativePath(info.root, prefix)),
     )
-  ).filter((file) => pathMatchesPrefix(file, info.root === "." ? "" : info.root));
+  )
+    .filter((file) => pathMatchesPrefix(file, info.root === "." ? "" : info.root))
+    .filter(isReviewableReactSourceFile);
 }
 
 async function packageTestFiles(root: string, info: ReactPackage): Promise<string[]> {
@@ -516,7 +545,7 @@ function routeMatches(
 
 function routeDeclarations(source: string, routeTagNames: ReadonlySet<string>): RouteDeclaration[] {
   const routes: RouteDeclaration[] = [];
-  const pathStack: string[] = [];
+  const pathStack: Array<string | null> = [];
   const strippedSource = stripJsxComments(source);
   const tagPattern = routeTagPattern(routeTagNames);
   for (const match of strippedSource.matchAll(tagPattern)) {
@@ -536,16 +565,12 @@ function routeDeclarations(source: string, routeTagNames: ReadonlySet<string>): 
       continue;
     }
     const declaredPath = topLevelPropValue(tag.props, "path") ?? undefined;
+    const hasPathProp = topLevelPropExists(tag.props, "path");
     const indexProp = topLevelPropValue(tag.props, "index");
     const isIndexRoute = indexProp === null || indexProp === "true";
-    const parentPath = pathStack.at(-1) ?? "";
-    const path =
-      declaredPath === undefined
-        ? isIndexRoute
-          ? parentPath || "/"
-          : parentPath
-        : joinReactRoutePaths(parentPath, declaredPath);
-    if (declaredPath !== undefined || isIndexRoute) {
+    const parentPath = pathStack.length === 0 ? "" : (pathStack[pathStack.length - 1] ?? null);
+    const path = reactRoutePath(parentPath, declaredPath, hasPathProp, isIndexRoute);
+    if (path !== null && (declaredPath !== undefined || isIndexRoute)) {
       routes.push({ path, component: routeElementComponent(tag.props) });
     }
     if (!tag.selfClosing) {
@@ -555,11 +580,32 @@ function routeDeclarations(source: string, routeTagNames: ReadonlySet<string>): 
   return routes;
 }
 
+function reactRoutePath(
+  parentPath: string | null,
+  declaredPath: string | undefined,
+  hasPathProp: boolean,
+  isIndexRoute: boolean,
+): string | null {
+  if (parentPath === null) {
+    return null;
+  }
+  if (declaredPath !== undefined) {
+    return joinReactRoutePaths(parentPath, declaredPath);
+  }
+  if (hasPathProp) {
+    return null;
+  }
+  return isIndexRoute ? parentPath || "/" : parentPath;
+}
+
 function reactRouterRouteTagNames(source: string): Set<string> {
   const names = new Set<string>();
   for (const match of source.matchAll(
     /import\s+\{([^}]+)\}\s+from\s+["']react-router(?:-dom)?["']/gu,
   )) {
+    if (isInsideJsString(source, match.index)) {
+      continue;
+    }
     const imports = match[1];
     if (imports === undefined) {
       continue;
@@ -584,13 +630,17 @@ function routeElementComponent(props: string): string | null {
   if (element === undefined) {
     return null;
   }
-  const root = readJsxOpeningTag(element, 0);
+  const expression = unwrapParenthesizedExpression(element.trim());
+  if (!expression.startsWith("<")) {
+    return conditionalElementComponent(expression);
+  }
+  const root = readJsxOpeningTag(expression, 0);
   if (root === null) {
     return null;
   }
   let current = root;
   while (!current.selfClosing && isRouteWrapperComponent(current.name)) {
-    const child = readJsxOpeningTag(element, current.end);
+    const child = readJsxOpeningTag(expression, current.end);
     if (child === null) {
       break;
     }
@@ -599,7 +649,61 @@ function routeElementComponent(props: string): string | null {
   return current.name;
 }
 
+function unwrapParenthesizedExpression(expression: string): string {
+  let current = expression;
+  while (current.startsWith("(") && current.endsWith(")")) {
+    current = current.slice(1, -1).trim();
+  }
+  return current;
+}
+
+function conditionalElementComponent(expression: string): string | null {
+  if (!expression.includes("?") || !expression.includes(":")) {
+    return null;
+  }
+  const candidates = new Set(
+    jsxOpeningTagNames(expression).filter(
+      (name) => !isFrameworkRouteComponent(name) && !isRouteWrapperComponent(name),
+    ),
+  );
+  return candidates.size === 1 ? ([...candidates][0] ?? null) : null;
+}
+
+function jsxOpeningTagNames(source: string): string[] {
+  const names: string[] = [];
+  let cursor = 0;
+  while (cursor < source.length) {
+    const openIndex = source.indexOf("<", cursor);
+    if (openIndex === -1) {
+      break;
+    }
+    if (source[openIndex + 1] === "/") {
+      cursor = openIndex + 2;
+      continue;
+    }
+    const tag = readJsxOpeningTag(source, openIndex);
+    if (tag === null) {
+      cursor = openIndex + 1;
+      continue;
+    }
+    names.push(tag.name);
+    cursor = tag.end;
+  }
+  return names;
+}
+
 function topLevelPropValue(props: string, name: string): string | null | undefined {
+  return readTopLevelProp(props, name)?.value;
+}
+
+function topLevelPropExists(props: string, name: string): boolean {
+  return readTopLevelProp(props, name) !== undefined;
+}
+
+function readTopLevelProp(
+  props: string,
+  name: string,
+): { value: string | null | undefined } | undefined {
   let braceDepth = 0;
   let quote: string | null = null;
   let escaped = false;
@@ -628,7 +732,7 @@ function topLevelPropValue(props: string, name: string): string | null | undefin
       continue;
     }
     if (braceDepth === 0 && propNameMatchesAt(props, name, index)) {
-      return readTopLevelPropValue(props, index + name.length);
+      return { value: readTopLevelPropValue(props, index + name.length) };
     }
   }
   return undefined;
@@ -675,14 +779,13 @@ function readTopLevelPropValue(props: string, index: number): string | null | un
 }
 
 function readJsxExpressionProp(props: string, propName: string): string | undefined {
-  const match = new RegExp(`(?:^|\\s)${propName}\\s*=\\s*\\{`, "u").exec(props);
-  if (match === null) {
+  const start = topLevelExpressionPropStart(props, propName);
+  if (start === undefined) {
     return undefined;
   }
   let depth = 1;
   let quote: string | null = null;
   let escaped = false;
-  const start = match.index + match[0].length;
   for (let index = start; index < props.length; index += 1) {
     const char = props[index];
     if (quote !== null) {
@@ -705,6 +808,53 @@ function readJsxExpressionProp(props: string, propName: string): string | undefi
         return props.slice(start, index);
       }
     }
+  }
+  return undefined;
+}
+
+function topLevelExpressionPropStart(props: string, name: string): number | undefined {
+  let braceDepth = 0;
+  let quote: string | null = null;
+  let escaped = false;
+  for (let index = 0; index < props.length; index += 1) {
+    const char = props[index];
+    if (quote !== null) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") {
+      quote = char;
+      continue;
+    }
+    if (char === "{") {
+      braceDepth += 1;
+      continue;
+    }
+    if (char === "}") {
+      braceDepth = Math.max(0, braceDepth - 1);
+      continue;
+    }
+    if (braceDepth !== 0 || !propNameMatchesAt(props, name, index)) {
+      continue;
+    }
+    let cursor = index + name.length;
+    while (/\s/u.test(props[cursor] ?? "")) {
+      cursor += 1;
+    }
+    if (props[cursor] !== "=") {
+      return undefined;
+    }
+    cursor += 1;
+    while (/\s/u.test(props[cursor] ?? "")) {
+      cursor += 1;
+    }
+    return props[cursor] === "{" ? cursor + 1 : undefined;
   }
   return undefined;
 }
@@ -771,12 +921,7 @@ function isRouteWrapperComponent(name: string): boolean {
 }
 
 function stripJsxComments(source: string): string {
-  return source
-    .split("\n")
-    .map(stripLineComment)
-    .join("\n")
-    .replace(/\{\/\*[\s\S]*?\*\/\}/gu, "")
-    .replace(/\/\*[\s\S]*?\*\//gu, "");
+  return stripBlockComments(source.split("\n").map(stripLineComment).join("\n"));
 }
 
 function stripLineComment(line: string): string {
@@ -805,14 +950,73 @@ function stripLineComment(line: string): string {
   return line;
 }
 
+function stripBlockComments(source: string): string {
+  let output = "";
+  let quote: string | null = null;
+  let escaped = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index] ?? "";
+    if (quote !== null) {
+      output += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") {
+      quote = char;
+      output += char;
+      continue;
+    }
+    if (source.startsWith("{/*", index)) {
+      const end = source.indexOf("*/}", index + 3);
+      const close = end === -1 ? source.length : end + 3;
+      output += blankComment(source.slice(index, close));
+      index = close - 1;
+      continue;
+    }
+    if (source.startsWith("/*", index)) {
+      const end = source.indexOf("*/", index + 2);
+      const close = end === -1 ? source.length : end + 2;
+      output += blankComment(source.slice(index, close));
+      index = close - 1;
+      continue;
+    }
+    output += char;
+  }
+  return output;
+}
+
+function blankComment(source: string): string {
+  return source.replace(/[^\n]/gu, " ");
+}
+
 function readRouteTag(
   source: string,
   start: number,
 ): { props: string; selfClosing: boolean } | null {
   let braceDepth = 0;
+  let quote: string | null = null;
+  let escaped = false;
   for (let index = start; index < source.length; index += 1) {
     const char = source[index];
-    if (char === "{") {
+    if (quote !== null) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") {
+      quote = char;
+    } else if (char === "{") {
       braceDepth += 1;
     } else if (char === "}") {
       braceDepth = Math.max(0, braceDepth - 1);
@@ -842,7 +1046,11 @@ function componentImports(root: string, fromPath: string, source: string): Map<s
   for (const match of source.matchAll(lazyImportRe)) {
     const component = match[1];
     const importPath = match[2];
-    if (component === undefined || importPath === undefined) {
+    if (
+      component === undefined ||
+      importPath === undefined ||
+      isInsideJsString(source, match.index)
+    ) {
       continue;
     }
     const resolved = resolveImport(root, fromPath, importPath);
@@ -853,7 +1061,11 @@ function componentImports(root: string, fromPath: string, source: string): Map<s
   for (const match of source.matchAll(defaultImportRe)) {
     const component = match[1];
     const importPath = match[2];
-    if (component === undefined || importPath === undefined) {
+    if (
+      component === undefined ||
+      importPath === undefined ||
+      isInsideJsString(source, match.index)
+    ) {
       continue;
     }
     const resolved = resolveImport(root, fromPath, importPath);
@@ -864,7 +1076,11 @@ function componentImports(root: string, fromPath: string, source: string): Map<s
   for (const match of source.matchAll(namedImportRe)) {
     const importList = match[1];
     const importPath = match[2];
-    if (importList === undefined || importPath === undefined) {
+    if (
+      importList === undefined ||
+      importPath === undefined ||
+      isInsideJsString(source, match.index)
+    ) {
       continue;
     }
     const resolved = resolveImport(root, fromPath, importPath);
@@ -902,7 +1118,11 @@ function directImportRefs(root: string, path: string): SeedFileRef[] {
   const refs: SeedFileRef[] = [];
   for (const match of source.matchAll(anyImportRe)) {
     const importPath = match[1];
-    if (importPath === undefined || !importPath.startsWith(".")) {
+    if (
+      importPath === undefined ||
+      !importPath.startsWith(".") ||
+      isInsideJsString(source, match.index)
+    ) {
       continue;
     }
     const resolved = resolveImport(root, path, importPath);
@@ -995,15 +1215,21 @@ function realPathInsideRoot(root: string, path: string): boolean {
 }
 
 function associatedTests(files: string[], tests: string[], command: string | null): SeedTestRef[] {
-  const fileStems = new Set(files.map((file) => basename(file).replace(/\.[^.]+$/u, "")));
   const dirs = new Set(files.map((file) => dirname(file)));
-  const exact = tests.filter((test) =>
-    fileStems.has(basename(test).replace(/\.(test|spec)\.[^.]+$/u, "")),
-  );
+  const exact = tests.filter((test) => files.some((file) => isExactTestForFile(file, test)));
   const nearby = tests.filter(
     (test) => !exact.includes(test) && [...dirs].some((dir) => pathMatchesPrefix(test, dir)),
   );
   return [...exact, ...nearby].slice(0, 8).map((path) => ({ path, command }));
+}
+
+function isExactTestForFile(file: string, test: string): boolean {
+  const fileStem = basename(file).replace(/\.[^.]+$/u, "");
+  const testStem = basename(test).replace(/\.(test|spec)\.[^.]+$/u, "");
+  if (fileStem !== testStem) {
+    return false;
+  }
+  return fileStem !== "index" || dirname(file) === dirname(test);
 }
 
 function packageTestCommand(info: ReactPackage): string | null {
@@ -1024,8 +1250,25 @@ function packageScripts(pkg: PackageJson): Set<string> {
   );
 }
 
+function isReviewableReactSourceFile(path: string): boolean {
+  return (
+    /\.(tsx|jsx|ts|js)$/u.test(path) &&
+    !isJsTestPath(path) &&
+    !/\.d\.[cm]?ts$/u.test(path) &&
+    !isReactSupportPath(path)
+  );
+}
+
 function isReactComponentFile(path: string): boolean {
-  return /\.(tsx|jsx)$/u.test(path) && !isJsTestPath(path) && !/\.d\.[cm]?ts$/u.test(path);
+  return /\.(tsx|jsx)$/u.test(path) && isReviewableReactSourceFile(path);
+}
+
+function isReactSupportPath(path: string): boolean {
+  return (
+    /(^|\/)(\.storybook|stories|__stories__)(\/|$)/u.test(path) ||
+    /(^|\/)(fixtures|__fixtures__|testdata)(\/|$)/u.test(path) ||
+    /\.(stories|story)\.[^.]+$/u.test(path)
+  );
 }
 
 function isJsTestPath(path: string): boolean {

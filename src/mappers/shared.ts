@@ -252,6 +252,9 @@ export function nodeScriptCommand(
   script: string,
 ): string {
   if (packageRoot === ".") {
+    if (packageManager === "bun") {
+      return `bun run ${script}`;
+    }
     return packageManager === "npm" ? `npm run ${script}` : `${packageManager} ${script}`;
   }
   if (packageManager === "pnpm") {

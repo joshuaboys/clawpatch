@@ -740,6 +740,20 @@ async function isPythonProject(root: string): Promise<boolean> {
 }
 
 async function containsReviewablePythonFile(root: string): Promise<boolean> {
+  for (const entry of await readdir(root).catch(() => [])) {
+    if (!entry.endsWith(".py")) {
+      continue;
+    }
+    const full = join(root, entry);
+    const info = await lstat(full);
+    if (!info.isFile() || info.isSymbolicLink()) {
+      continue;
+    }
+    const source = await readFile(full, "utf8");
+    if (/(?:^|\n)\s*(?:from\s+fastapi\s+import\b|import\s+fastapi\b)/u.test(source)) {
+      return true;
+    }
+  }
   for (const prefix of ["src", "app", "apps", "lib", "scripts"]) {
     if (await containsFileWithExtension(join(root, prefix), ".py", 4)) {
       return true;
