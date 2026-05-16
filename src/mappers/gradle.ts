@@ -1208,7 +1208,6 @@ function kotlinTypeNames(raw: string): string[] {
   }
   parts.push(current);
   return parts
-    .flatMap((type) => splitJavaTypeList(type))
     .map((type) => baseKotlinTypeName(stripGenericParameters(type)))
     .filter((type) => type.length > 0);
 }
@@ -1455,7 +1454,7 @@ async function gradleTags(
 
 function hasAppliedAndroidPlugin(buildSource: string): boolean {
   const source = stripJavaComments(buildSource).replace(
-    /\bid\s*\(?\s*["']com\.android\.(?:application|library|dynamic-feature|test)["']\s*\)?(?:(?!\bid\s*\(?\s*["']).)*?(?:\bapply\s+false\b|\.\s*apply\s*\(\s*false\s*\))/gsu,
+    /\bid\s*\(?\s*["']com\.android\.(?:application|library|dynamic-feature|test)["']\s*\)?(?:(?!\b(?:id|alias)\s*\().)*?(?:\bapply\s+false\b|\.\s*apply\s*\(\s*false\s*\))/gsu,
     "",
   );
   return (
