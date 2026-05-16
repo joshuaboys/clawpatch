@@ -46,7 +46,8 @@ const routeIndexPropRe = /\bindex(?:\s*=\s*\{?true\}?)?/su;
 const routeElementPropRe = /\belement=\{\s*<([A-Z][A-Za-z0-9_]*)/su;
 const lazyImportRe =
   /const\s+([A-Z][A-Za-z0-9_]*)\s*=\s*(?:React\.)?lazy\(\s*\(\)\s*=>\s*import\(\s*["']([^"']+)["']\s*\)\s*\)/gu;
-const defaultImportRe = /import\s+([A-Z][A-Za-z0-9_]*)\s+from\s+["']([^"']+)["']/gu;
+const defaultImportRe =
+  /import\s+([A-Z][A-Za-z0-9_]*)(?:\s*,\s*\{[^}]*\})?\s+from\s+["']([^"']+)["']/gu;
 const namedImportRe = /import\s+\{([^}]+)\}\s+from\s+["']([^"']+)["']/gu;
 const anyImportRe = /from\s+["']([^"']+)["']/gu;
 const reactRouterRouteImportRe =

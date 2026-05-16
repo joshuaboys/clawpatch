@@ -30,8 +30,8 @@ type FastApiRoute = {
 };
 
 type FastApiPrefixInfo = {
-  filePrefixes: Map<string, string>;
-  routerMountPrefixesByFile: Map<string, Map<string, string>>;
+  filePrefixes: Map<string, string[]>;
+  routerMountPrefixesByFile: Map<string, Map<string, string[]>>;
   fastApiReceiversByFile: Map<string, Set<string>>;
 };
 
@@ -229,19 +229,23 @@ function fastApiRoutesInFile(
     if (functionName === null) {
       continue;
     }
-    const filePrefix = acceptedReceivers.size <= 1 ? (prefixes.filePrefixes.get(file) ?? "") : "";
-    const decoratorPrefix = joinRoutePaths(
-      routerMountPrefixes.get(decorator.receiver) ?? filePrefix,
-      routerPrefixes.get(decorator.receiver) ?? "",
-    );
-    routes.push({
-      method: decorator.method,
-      path: joinRoutePaths(decoratorPrefix, decorator.path),
-      functionName,
-      file,
-    });
+    const filePrefixes =
+      acceptedReceivers.size <= 1 ? (prefixes.filePrefixes.get(file) ?? [""]) : [""];
+    const mountPrefixes = routerMountPrefixes.get(decorator.receiver) ?? filePrefixes;
+    for (const mountPrefix of mountPrefixes) {
+      const decoratorPrefix = joinRoutePaths(
+        mountPrefix,
+        routerPrefixes.get(decorator.receiver) ?? "",
+      );
+      routes.push({
+        method: decorator.method,
+        path: joinRoutePaths(decoratorPrefix, decorator.path),
+        functionName,
+        file,
+      });
+    }
   }
-  return routes;
+  return uniqueFastApiRoutes(routes);
 }
 
 function apiRouterPrefixes(source: string): Map<string, string> {
@@ -321,12 +325,12 @@ function nextFunctionName(lines: string[], start: number): string | null {
 }
 
 function routePrefixes(sources: Map<string, string>): FastApiPrefixInfo {
-  const prefixes = new Map<string, string>();
+  const prefixes = new Map<string, string[]>();
   const sourceFiles = new Set(sources.keys());
   const aliasesByFile = new Map<string, Map<string, string>>();
   const includesByFile = new Map<string, ReturnType<typeof includeRouterCalls>>();
   const routerPrefixesByFile = new Map<string, Map<string, string>>();
-  const routerMountPrefixesByFile = new Map<string, Map<string, string>>();
+  const routerMountPrefixesByFile = new Map<string, Map<string, string[]>>();
   const fastApiReceiversByFile = new Map<string, Set<string>>();
   for (const [file, source] of sources) {
     aliasesByFile.set(file, pythonImportAliases(file, source, sourceFiles));
@@ -343,26 +347,25 @@ function routePrefixes(sources: Map<string, string>): FastApiPrefixInfo {
       const mounts = routerMountPrefixesByFile.get(file);
       for (const include of includes) {
         const receiverRouterPrefix = localRouterPrefixes.get(include.receiver) ?? "";
-        const parentPrefix =
+        const parentPrefixes =
           include.receiver === "app"
-            ? ""
-            : joinRoutePaths(
-                mounts?.get(include.receiver) ?? prefixes.get(file) ?? "",
-                receiverRouterPrefix,
+            ? [""]
+            : (mounts?.get(include.receiver) ?? prefixes.get(file) ?? [""]).map((prefix) =>
+                joinRoutePaths(prefix, receiverRouterPrefix),
               );
-        const fullPrefix = joinRoutePaths(parentPrefix, include.prefix);
-        if (!include.target.includes(".")) {
-          if (mounts !== undefined) {
-            changed = setMapValue(mounts, include.target, fullPrefix) || changed;
+        for (const parentPrefix of parentPrefixes) {
+          const fullPrefix = joinRoutePaths(parentPrefix, include.prefix);
+          if (!include.target.includes(".") && mounts !== undefined) {
+            changed = addMapValue(mounts, include.target, fullPrefix) || changed;
           }
-        }
-        const moduleFile = aliases.get(include.target.split(".")[0] ?? "");
-        if (moduleFile !== undefined) {
-          changed = setMapValue(prefixes, moduleFile, fullPrefix) || changed;
-          const moduleMounts = routerMountPrefixesByFile.get(moduleFile);
-          const targetRouter = include.target.split(".")[1] ?? include.target.split(".")[0];
-          if (moduleMounts !== undefined && targetRouter !== undefined) {
-            changed = setMapValue(moduleMounts, targetRouter, fullPrefix) || changed;
+          const moduleFile = aliases.get(include.target.split(".")[0] ?? "");
+          if (moduleFile !== undefined) {
+            changed = addMapValue(prefixes, moduleFile, fullPrefix) || changed;
+            const moduleMounts = routerMountPrefixesByFile.get(moduleFile);
+            const targetRouter = include.target.split(".")[1] ?? include.target.split(".")[0];
+            if (moduleMounts !== undefined && targetRouter !== undefined) {
+              changed = addMapValue(moduleMounts, targetRouter, fullPrefix) || changed;
+            }
           }
         }
       }
@@ -373,17 +376,18 @@ function routePrefixes(sources: Map<string, string>): FastApiPrefixInfo {
   }
   for (const file of sources.keys()) {
     if (!prefixes.has(file) && /(^|\/)routes\/[^/]+\.py$/u.test(file)) {
-      prefixes.set(file, inferredRoutePrefix(file));
+      prefixes.set(file, [inferredRoutePrefix(file)]);
     }
   }
   return { filePrefixes: prefixes, routerMountPrefixesByFile, fastApiReceiversByFile };
 }
 
-function setMapValue(map: Map<string, string>, key: string, value: string): boolean {
-  if (map.get(key) === value) {
+function addMapValue(map: Map<string, string[]>, key: string, value: string): boolean {
+  const values = map.get(key) ?? [];
+  if (values.includes(value)) {
     return false;
   }
-  map.set(key, value);
+  map.set(key, [...values, value]);
   return true;
 }
 
@@ -395,13 +399,34 @@ function includeRouterCalls(
     const receiver = match[1];
     const openParenIndex = match.index + match[0].length - 1;
     const args = readPythonCallArgs(source, openParenIndex);
-    const target = /^\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)/u.exec(args)?.[1];
+    const target = includeRouterTarget(args);
     const prefixMatch = /\bprefix\s*=\s*(["'])([^"']*)\1/u.exec(args);
     if (receiver !== undefined && target !== undefined) {
       calls.push({ receiver, target, prefix: prefixMatch?.[2] ?? "" });
     }
   }
   return calls;
+}
+
+function includeRouterTarget(args: string): string | undefined {
+  return (
+    /\brouter\s*=\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)/u.exec(args)?.[1] ??
+    /^\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)/u.exec(args)?.[1]
+  );
+}
+
+function uniqueFastApiRoutes(routes: FastApiRoute[]): FastApiRoute[] {
+  const seen = new Set<string>();
+  const output: FastApiRoute[] = [];
+  for (const route of routes) {
+    const key = `${route.method}\0${route.path}\0${route.functionName}\0${route.file}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    output.push(route);
+  }
+  return output;
 }
 
 function readPythonCallArgs(source: string, openParenIndex: number): string {

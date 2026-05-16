@@ -402,7 +402,7 @@ describe("mapFeatures", () => {
         "import { Navigate, Route, Routes } from 'react-router-dom';",
         "const CasesPage = lazy(() => import('./pages/CasesPage'));",
         "const ReactLazyPage = React.lazy(() => import('./pages/ReactLazyPage'));",
-        "import HomePage from './pages/HomePage';",
+        "import HomePage, { loader } from './pages/HomePage';",
         "import ReportsPage from './pages/ReportsPage';",
         "import SettingsPage from './pages/SettingsPage';",
         "import SuspensePage from './pages/SuspensePage';",
@@ -1276,7 +1276,8 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
         "app = FastAPI()",
         'app.include_router(auth_router, dependencies=[Depends(auth)], prefix="/api/v1/auth")',
         "app.include_router(health_router)",
-        'app.include_router(api_router, prefix="/api/v1")',
+        'app.include_router(router=api_router, prefix="/api/v1")',
+        'app.include_router(router=api_router, prefix="/api/v2")',
         '@app.get("/health")',
         "def health():",
         "    return {'ok': True}",
@@ -1339,6 +1340,7 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
     expect(titles).toContain("FastAPI route GET /health");
     expect(titles).toContain("FastAPI route GET /ready");
     expect(titles).toContain("FastAPI route POST /api/v1/auth/login");
+    expect(titles).toContain("FastAPI route GET /api/v2/cases/{case_id}");
     expect(caseRoute?.source).toBe("fastapi-route");
     expect(caseRoute?.entrypoints[0]).toMatchObject({
       path: "backend/routes/case_routes.py",
@@ -1397,6 +1399,7 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
         '# router = fastapi.APIRouter(prefix="/stale")',
         'router: fastapi.APIRouter = fastapi.APIRouter(dependencies=[Depends(auth)], prefix="/v1")',
         'app.include_router(router, prefix="/api")',
+        'app.include_router(router, prefix="/admin")',
         '# app.include_router(router, prefix="/disabled")',
         '@router.get("/items")',
         "def items():",
@@ -1410,6 +1413,12 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
     const project = await detectProject(root);
     const result = await mapFeatures(root, project, []);
 
+    expect(result.features.map((feature) => feature.title)).toContain(
+      "FastAPI route GET /admin/v1/items",
+    );
+    expect(result.features.map((feature) => feature.title)).toContain(
+      "FastAPI route POST /admin/v1/keyword",
+    );
     expect(result.features.map((feature) => feature.title)).toContain(
       "FastAPI route GET /api/v1/items",
     );
