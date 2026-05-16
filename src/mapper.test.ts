@@ -815,6 +815,25 @@ describe("mapFeatures", () => {
     );
     await writeFixture(
       root,
+      "apps/web/package.json",
+      JSON.stringify({ dependencies: { react: "1.0.0", "react-router-dom": "1.0.0" } }, null, 2),
+    );
+    await writeFixture(
+      root,
+      "apps/web/src/App.tsx",
+      [
+        "import { Route, Routes } from 'react-router-dom';",
+        "import WebPage from './WebPage';",
+        'export function App() { return <Routes><Route path="/web" element={<WebPage />} /></Routes>; }',
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "apps/web/src/WebPage.tsx",
+      "export default function WebPage() { return null; }\n",
+    );
+    await writeFixture(
+      root,
       "packages/legacy/package.json",
       JSON.stringify({ dependencies: { react: "1.0.0", "react-router-dom": "1.0.0" } }, null, 2),
     );
@@ -858,6 +877,7 @@ describe("mapFeatures", () => {
 
     expect(titles).toContain("React route /home");
     expect(titles).toContain("React route /plugin");
+    expect(titles).toContain("React route /web");
     expect(titles).not.toContain("React route /legacy");
     expect(titles).not.toContain("React route /ignored");
   });
@@ -1682,6 +1702,7 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
         "app: fastapi.FastAPI = fastapi.FastAPI()",
         '# @app.get("/old")',
         "@app.get(",
+        '    # path="/stale",',
         '    "/health",',
         "    response_model=dict,",
         ")",
@@ -1695,6 +1716,9 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
 
     expect(result.features.map((feature) => feature.title)).toContain("FastAPI route GET /health");
     expect(result.features.map((feature) => feature.title)).not.toContain("FastAPI route GET /old");
+    expect(result.features.map((feature) => feature.title)).not.toContain(
+      "FastAPI route GET /stale",
+    );
   });
 
   it("ignores quoted text in Python comments while mapping FastAPI routes", async () => {
@@ -1720,9 +1744,7 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
     const project = await detectProject(root);
     const result = await mapFeatures(root, project, []);
 
-    expect(result.features.map((feature) => feature.title)).toContain(
-      "FastAPI route GET /health",
-    );
+    expect(result.features.map((feature) => feature.title)).toContain("FastAPI route GET /health");
   });
 
   it("applies FastAPI include prefixes from non-app application variables", async () => {

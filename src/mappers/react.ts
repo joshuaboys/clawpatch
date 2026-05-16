@@ -231,10 +231,11 @@ async function packageJsonPaths(root: string): Promise<string[]> {
       paths.add(packageJsonPath);
     }
   }
-  if (patterns.length === 0) {
-    for (const path of (await walk(root, ["apps", "packages", "frontend", "client", "web"])).filter(
-      (file) => file.endsWith("/package.json") && !isSampleProjectPath(file),
-    )) {
+  for (const path of (await walk(root, ["apps", "packages", "frontend", "client", "web"])).filter(
+    (file) => file.endsWith("/package.json") && !isSampleProjectPath(file),
+  )) {
+    const packageRoot = dirname(path);
+    if (!isExcludedWorkspace(packageRoot, excludes)) {
       paths.add(path);
     }
   }

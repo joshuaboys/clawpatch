@@ -328,7 +328,7 @@ function fastApiDecorators(
     const receiver = match[1];
     const method = match[2];
     const openParenIndex = match.index + match[0].length - 1;
-    const args = readPythonCallArgs(source, openParenIndex);
+    const args = stripLineComments(readPythonCallArgs(source, openParenIndex), "#");
     const path = fastApiPathArg(args);
     if (receiver !== undefined && method !== undefined && path !== undefined) {
       decorators.push({
