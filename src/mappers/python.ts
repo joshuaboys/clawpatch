@@ -282,6 +282,19 @@ function fastApiReceivers(source: string): Set<string> {
   return receivers;
 }
 
+function fastApiAppReceivers(source: string): Set<string> {
+  const receivers = new Set<string>();
+  for (const match of source.matchAll(
+    /^\s*([A-Za-z_][A-Za-z0-9_]*)(?:\s*:\s*[^=\n]+)?\s*=\s*(?:fastapi\.)?FastAPI\(/gmu,
+  )) {
+    const receiver = match[1];
+    if (receiver !== undefined) {
+      receivers.add(receiver);
+    }
+  }
+  return receivers;
+}
+
 function fastApiDecorators(
   source: string,
 ): Array<{ receiver: string; method: string; path: string; lineIndex: number }> {
@@ -337,12 +350,14 @@ function routePrefixes(sources: Map<string, string>): FastApiPrefixInfo {
   const routerPrefixesByFile = new Map<string, Map<string, string>>();
   const routerMountPrefixesByFile = new Map<string, Map<string, string[]>>();
   const fastApiReceiversByFile = new Map<string, Set<string>>();
+  const fastApiAppReceiversByFile = new Map<string, Set<string>>();
   for (const [file, source] of sources) {
     aliasesByFile.set(file, pythonImportAliases(file, source, sourceFiles));
     includesByFile.set(file, includeRouterCalls(source));
     routerPrefixesByFile.set(file, apiRouterPrefixes(source));
     routerMountPrefixesByFile.set(file, new Map());
     fastApiReceiversByFile.set(file, fastApiReceivers(source));
+    fastApiAppReceiversByFile.set(file, fastApiAppReceivers(source));
   }
   for (let pass = 0; pass < sources.size + 1; pass += 1) {
     let changed = false;
@@ -350,14 +365,14 @@ function routePrefixes(sources: Map<string, string>): FastApiPrefixInfo {
       const aliases = aliasesByFile.get(file) ?? emptyPythonImportAliases();
       const localRouterPrefixes = routerPrefixesByFile.get(file) ?? new Map<string, string>();
       const mounts = routerMountPrefixesByFile.get(file);
+      const appReceivers = fastApiAppReceiversByFile.get(file) ?? new Set<string>();
       for (const include of includes) {
         const receiverRouterPrefix = localRouterPrefixes.get(include.receiver) ?? "";
-        const parentPrefixes =
-          include.receiver === "app"
-            ? [""]
-            : (mounts?.get(include.receiver) ?? prefixes.get(file))?.map((prefix) =>
-                joinRoutePaths(prefix, receiverRouterPrefix),
-              );
+        const parentPrefixes = appReceivers.has(include.receiver)
+          ? [""]
+          : (mounts?.get(include.receiver) ?? prefixes.get(file))?.map((prefix) =>
+              joinRoutePaths(prefix, receiverRouterPrefix),
+            );
         if (parentPrefixes === undefined) {
           continue;
         }

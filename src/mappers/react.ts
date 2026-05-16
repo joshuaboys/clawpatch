@@ -42,7 +42,6 @@ type RouteDeclaration = {
 };
 
 const routePathPropRe = /\bpath=(["'])(.*?)\1/su;
-const routeIndexPropRe = /\bindex(?:\s*=\s*\{?true\}?)?/su;
 const lazyImportRe =
   /const\s+([A-Z][A-Za-z0-9_]*)\s*=\s*(?:React\.)?lazy\(\s*\(\)\s*=>\s*import\(\s*["']([^"']+)["']\s*\)\s*\)/gu;
 const defaultImportRe =
@@ -175,20 +174,41 @@ async function componentSeeds(
 
 async function discoverReactPackages(root: string): Promise<ReactPackage[]> {
   const packages: ReactPackage[] = [];
-  const packageManager = await detectNodePackageManager(root);
+  const rootPackageManager = await detectNodePackageManager(root);
   for (const packageJsonPath of await packageJsonPaths(root)) {
     const packageJson = await readPackageJsonAt(root, packageJsonPath);
     if (packageJson === null || !hasReactDependency(packageJson)) {
       continue;
     }
+    const packageRoot = dirname(packageJsonPath) === "." ? "." : dirname(packageJsonPath);
     packages.push({
-      root: dirname(packageJsonPath) === "." ? "." : dirname(packageJsonPath),
+      root: packageRoot,
       packageJsonPath,
       packageJson,
-      packageManager,
+      packageManager: await packageManagerForReactPackage(root, packageRoot, rootPackageManager),
     });
   }
   return packages;
+}
+
+async function packageManagerForReactPackage(
+  root: string,
+  packageRoot: string,
+  fallback: string,
+): Promise<string> {
+  if (packageRoot === "." || !(await hasPackageManagerMarker(root, packageRoot))) {
+    return fallback;
+  }
+  return detectNodePackageManager(join(root, packageRoot));
+}
+
+async function hasPackageManagerMarker(root: string, packageRoot: string): Promise<boolean> {
+  return (
+    (await pathExists(join(root, packageRoot, "pnpm-lock.yaml"))) ||
+    (await pathExists(join(root, packageRoot, "pnpm-workspace.yaml"))) ||
+    (await pathExists(join(root, packageRoot, "yarn.lock"))) ||
+    (await pathExists(join(root, packageRoot, "bun.lockb")))
+  );
 }
 
 async function packageJsonPaths(root: string): Promise<string[]> {
@@ -499,7 +519,7 @@ function routeDeclarations(source: string): RouteDeclaration[] {
       continue;
     }
     const declaredPath = routePathPropRe.exec(tag.props)?.[2];
-    const isIndexRoute = routeIndexPropRe.test(tag.props);
+    const isIndexRoute = hasIndexRouteProp(tag.props);
     const parentPath = pathStack.at(-1) ?? "";
     const path =
       declaredPath === undefined
@@ -515,6 +535,10 @@ function routeDeclarations(source: string): RouteDeclaration[] {
     }
   }
   return routes;
+}
+
+function hasIndexRouteProp(props: string): boolean {
+  return /(?:^|\s)index(?:\s*=\s*\{?\s*true\s*\}?|(?=\s|$))/su.test(props);
 }
 
 function routeElementComponent(props: string): string | null {

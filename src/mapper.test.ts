@@ -420,6 +420,7 @@ describe("mapFeatures", () => {
         '    <Route path="/users">',
         '      <Route path=":id" element={<UserPage />} />',
         "    </Route>",
+        "    <Route index={false} element={<ReportsPage />} />",
         '    <Route path="/suspense" element={<Suspense><SuspensePage /></Suspense>} />',
         '    <Route element={<ReportsPage />} path="/reports" />',
         '    <Route path="/settings" element={<SettingsPage />} />',
@@ -542,6 +543,7 @@ describe("mapFeatures", () => {
     expect(titles).not.toContain("React route /line-old");
     expect(titles).not.toContain("React route /trailing-old");
     expect(titles).not.toContain("React route /test-only");
+    expect(titles.filter((title) => title === "React route /")).toHaveLength(1);
     expect(dialog?.source).toBe("react-component");
     expect(dialog?.ownedFiles).toEqual([
       { path: "frontend/src/components/Dialog.tsx", reason: "component implementation" },
@@ -667,6 +669,46 @@ describe("mapFeatures", () => {
     expect(titles).toContain("React route /plugin");
     expect(titles).not.toContain("React route /legacy");
     expect(titles).not.toContain("React route /ignored");
+  });
+
+  it("uses nested React package manager lockfiles for test commands", async () => {
+    const root = await fixtureRoot("clawpatch-react-nested-pm-");
+    await writeFixture(
+      root,
+      "frontend/package.json",
+      JSON.stringify(
+        {
+          scripts: { test: "vitest run" },
+          dependencies: { react: "1.0.0", "react-router-dom": "1.0.0" },
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFixture(root, "frontend/pnpm-lock.yaml", "lockfileVersion: '9.0'\n");
+    await writeFixture(
+      root,
+      "frontend/src/App.tsx",
+      [
+        "import { Route, Routes } from 'react-router-dom';",
+        "import HomePage from './pages/HomePage';",
+        'export function App() { return <Routes><Route path="/home" element={<HomePage />} /></Routes>; }',
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "frontend/src/pages/HomePage.tsx",
+      "export default function HomePage() { return null; }\n",
+    );
+    await writeFixture(root, "frontend/src/pages/HomePage.test.tsx", "test('home', () => {});\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const home = result.features.find((feature) => feature.title === "React route /home");
+
+    expect(home?.tests).toEqual([
+      { path: "frontend/src/pages/HomePage.test.tsx", command: "pnpm --dir frontend test" },
+    ]);
   });
 
   it("maps nested SwiftPM, Apple, and Android Gradle app surfaces", async () => {
@@ -1378,6 +1420,44 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
 
     expect(result.features.map((feature) => feature.title)).toContain("FastAPI route GET /health");
     expect(result.features.map((feature) => feature.title)).not.toContain("FastAPI route GET /old");
+  });
+
+  it("applies FastAPI include prefixes from non-app application variables", async () => {
+    const root = await fixtureRoot("clawpatch-fastapi-named-app-");
+    await writeFixture(
+      root,
+      "pyproject.toml",
+      '[project]\nname = "named-fastapi"\ndependencies = ["fastapi"]\n',
+    );
+    await writeFixture(root, "backend/__init__.py", "");
+    await writeFixture(
+      root,
+      "backend/main.py",
+      [
+        "from fastapi import FastAPI",
+        "from backend.routes.items import router",
+        "api: FastAPI = FastAPI()",
+        'api.include_router(router, prefix="/v1")',
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "backend/routes/items.py",
+      [
+        "from fastapi import APIRouter",
+        "router = APIRouter()",
+        '@router.get("/items")',
+        "def items():",
+        "    return []",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(titles).toContain("FastAPI route GET /v1/items");
+    expect(titles).not.toContain("FastAPI route GET /items");
   });
 
   it("applies same-file FastAPI router include prefixes", async () => {
