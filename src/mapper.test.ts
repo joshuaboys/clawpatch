@@ -447,6 +447,16 @@ describe("mapFeatures", () => {
       "log/runtime.gemspec",
       "Gem::Specification.new do |spec|\n  spec.name = 'log-artifact'\n  spec.add_dependency 'rails'\nend\n",
     );
+    await writeFixture(
+      root,
+      "target/generated.gemspec",
+      "Gem::Specification.new do |spec|\n  spec.name = 'target-artifact'\n  spec.add_dependency 'rails'\nend\n",
+    );
+    await writeFixture(
+      root,
+      ".build/generated.gemspec",
+      "Gem::Specification.new do |spec|\n  spec.name = 'build-artifact'\n  spec.add_dependency 'rails'\nend\n",
+    );
     await writeFixture(root, "config/application.rb", "module NotRails\nend\n");
     await writeFixture(root, "app/assets/admin.ts", "export const admin = true;\n");
 
@@ -462,6 +472,8 @@ describe("mapFeatures", () => {
     expect(titles).not.toContain("Ruby project built-artifact");
     expect(titles).not.toContain("Ruby project tmp-artifact");
     expect(titles).not.toContain("Ruby project log-artifact");
+    expect(titles).not.toContain("Ruby project target-artifact");
+    expect(titles).not.toContain("Ruby project build-artifact");
     expect(nodeAsset?.title).toBe("Node source app");
   });
 

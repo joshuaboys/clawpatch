@@ -3,18 +3,32 @@ import { join } from "node:path";
 
 const gemspecSearchSkipEntries = new Set([
   ".bundle",
+  ".build",
   ".git",
   ".clawpatch",
   ".worktrees",
+  ".swiftpm",
   "build",
+  "coverage",
   "dist",
   "log",
   "node_modules",
   "tmp",
+  "target",
   "vendor",
+  ".venv",
+  "venv",
+  "__pycache__",
+  ".mypy_cache",
+  ".ruff_cache",
+  ".pytest_cache",
   "fixtures",
   "__fixtures__",
   "testdata",
+  "Pods",
+  "Carthage",
+  "SourcePackages",
+  "DerivedData",
 ]);
 
 export function stripRubyComments(source: string): string {
