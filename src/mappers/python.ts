@@ -225,12 +225,17 @@ async function pythonSourceFiles(root: string): Promise<string[]> {
 
 async function rootPythonAppFiles(root: string): Promise<string[]> {
   const files: string[] = [];
+  for (const entry of await readdir(root).catch(() => [])) {
+    if ((await isSafeFile(root, join(root, entry))) && isReviewablePythonSourceFile(entry)) {
+      files.push(entry);
+    }
+  }
   for (const file of ["app.py", "main.py"]) {
     if ((await isSafeFile(root, join(root, file))) && isReviewablePythonSourceFile(file)) {
       files.push(file);
     }
   }
-  return files;
+  return uniquePaths(files);
 }
 
 function fastApiRoutesInFile(
@@ -551,11 +556,10 @@ function includeRouterCalls(source: string): IncludeRouterCall[] {
 }
 
 function includeRouterPrefix(args: string, source: string): string | null {
-  const assignment = /\bprefix\s*=/u.exec(args);
-  if (assignment === null) {
+  const expression = topLevelKeywordValue(args, "prefix");
+  if (expression === undefined) {
     return "";
   }
-  const expression = args.slice(assignment.index + assignment[0].length).trim();
   const literal = /^(['"])([^'"]*)\1/u.exec(expression)?.[2];
   if (literal !== undefined) {
     return literal;
@@ -609,10 +613,55 @@ function isInsidePythonString(source: string, offset: number): boolean {
 }
 
 function includeRouterTarget(args: string): string | undefined {
-  return (
-    /\brouter\s*=\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)/u.exec(args)?.[1] ??
-    /^\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)/u.exec(args)?.[1]
-  );
+  const expression = topLevelKeywordValue(args, "router") ?? firstTopLevelArg(args);
+  return /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*/u.exec(expression ?? "")?.[0];
+}
+
+function topLevelKeywordValue(args: string, name: string): string | undefined {
+  for (const part of topLevelArgs(args)) {
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([\s\S]*)$/u.exec(part);
+    if (match?.[1] === name) {
+      return match[2]?.trim();
+    }
+  }
+  return undefined;
+}
+
+function firstTopLevelArg(args: string): string | undefined {
+  return topLevelArgs(args).find((part) => !/^[A-Za-z_][A-Za-z0-9_]*\s*=/u.test(part));
+}
+
+function topLevelArgs(args: string): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  let depth = 0;
+  let quote: string | null = null;
+  let escaped = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const char = args[index];
+    if (quote !== null) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === "(" || char === "[" || char === "{") {
+      depth += 1;
+    } else if (char === ")" || char === "]" || char === "}") {
+      depth = Math.max(0, depth - 1);
+    } else if (char === "," && depth === 0) {
+      parts.push(args.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  parts.push(args.slice(start).trim());
+  return parts.filter((part) => part.length > 0);
 }
 
 function uniqueFastApiRoutes(routes: FastApiRoute[]): FastApiRoute[] {
