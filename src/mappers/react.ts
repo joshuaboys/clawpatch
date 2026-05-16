@@ -47,6 +47,8 @@ const lazyImportRe =
 const defaultImportRe = /import\s+([A-Z][A-Za-z0-9_]*)\s+from\s+["']([^"']+)["']/gu;
 const namedImportRe = /import\s+\{([^}]+)\}\s+from\s+["']([^"']+)["']/gu;
 const anyImportRe = /from\s+["']([^"']+)["']/gu;
+const reactRouterRouteImportRe =
+  /import\s+\{[^}]*\bRoute\b[^}]*\}\s+from\s+["']react-router(?:-dom)?["']/u;
 
 const packageRootCandidates = ["", "frontend", "client", "web", "ui", "app", "apps", "packages"];
 const sourceRoots = ["src", "app"];
@@ -74,6 +76,9 @@ async function routeSeeds(root: string, info: ReactPackage): Promise<FeatureSeed
 
   for (const file of routeFiles) {
     const source = await readFile(join(root, file), "utf8");
+    if (!reactRouterRouteImportRe.test(source)) {
+      continue;
+    }
     const routes = routeMatches(source, file);
     if (routes.length === 0) {
       continue;

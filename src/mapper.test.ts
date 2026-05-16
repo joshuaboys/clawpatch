@@ -510,6 +510,29 @@ describe("mapFeatures", () => {
     ]);
   });
 
+  it("does not map custom React Route components as React Router routes", async () => {
+    const root = await fixtureRoot("clawpatch-react-custom-route-");
+    await writeFixture(
+      root,
+      "package.json",
+      JSON.stringify({ dependencies: { react: "1.0.0" } }, null, 2),
+    );
+    await writeFixture(
+      root,
+      "src/App.tsx",
+      [
+        "function Route(_props: { path: string }) { return null; }",
+        "function Page() { return null; }",
+        'export function App() { return <Route path="/custom"><Page /></Route>; }',
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+
+    expect(result.features.map((feature) => feature.title)).not.toContain("React route /custom");
+  });
+
   it("maps nested SwiftPM, Apple, and Android Gradle app surfaces", async () => {
     const root = await fixtureRoot("clawpatch-native-app-map-");
     await writeFixture(root, "package.json", JSON.stringify({ name: "native-root" }, null, 2));
@@ -1212,6 +1235,35 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
     expect(result.features.map((feature) => feature.title)).toContain("FastAPI route GET /health");
   });
 
+  it("applies same-file FastAPI router include prefixes", async () => {
+    const root = await fixtureRoot("clawpatch-fastapi-local-router-");
+    await writeFixture(
+      root,
+      "pyproject.toml",
+      '[project]\nname = "api"\ndependencies = ["fastapi"]\n',
+    );
+    await writeFixture(
+      root,
+      "main.py",
+      [
+        "from fastapi import APIRouter, FastAPI",
+        "app = FastAPI()",
+        'router = APIRouter(prefix="/v1")',
+        'app.include_router(router, prefix="/api")',
+        '@router.get("/items")',
+        "def items():",
+        "    return []",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+
+    expect(result.features.map((feature) => feature.title)).toContain(
+      "FastAPI route GET /api/v1/items",
+    );
+  });
+
   it("maps FastAPI include prefixes in src layouts and relative imports", async () => {
     const root = await fixtureRoot("clawpatch-fastapi-src-map-");
     await writeFixture(
@@ -1322,6 +1374,38 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
     expect(result.features.map((feature) => feature.title)).not.toContain(
       "FastAPI route GET /health",
     );
+  });
+
+  it("does not map non-FastAPI decorators in mixed Python apps", async () => {
+    const root = await fixtureRoot("clawpatch-fastapi-mixed-decorators-");
+    await writeFixture(
+      root,
+      "pyproject.toml",
+      '[project]\nname = "mixed"\ndependencies = ["fastapi"]\n',
+    );
+    await writeFixture(
+      root,
+      "main.py",
+      [
+        "from fastapi import FastAPI",
+        "from flask import Flask",
+        "app = FastAPI()",
+        "flask_app = Flask(__name__)",
+        '@app.get("/api/health")',
+        "def api_health():",
+        "    return {'ok': True}",
+        '@flask_app.get("/flask/health")',
+        "def flask_health():",
+        "    return {'ok': True}",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(titles).toContain("FastAPI route GET /api/health");
+    expect(titles).not.toContain("FastAPI route GET /flask/health");
   });
 
   it("ignores unresolved FastAPI router imports when assigning prefixes", async () => {
