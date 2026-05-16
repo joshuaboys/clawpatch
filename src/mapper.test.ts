@@ -1627,9 +1627,9 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
       "backend/main.py",
       [
         "from fastapi import FastAPI",
-        "from backend.routes.routers import admin_router, public_router",
+        "from backend.routes.routers import admin_router, public_router as mounted_router",
         "app = FastAPI()",
-        'app.include_router(public_router, prefix="/public")',
+        'app.include_router(mounted_router, prefix="/public")',
         'app.include_router(admin_router, prefix="/admin")',
       ].join("\n"),
     );

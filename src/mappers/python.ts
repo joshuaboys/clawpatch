@@ -35,6 +35,11 @@ type FastApiPrefixInfo = {
   fastApiReceiversByFile: Map<string, Set<string>>;
 };
 
+type PythonImportAliases = {
+  files: Map<string, string>;
+  routerNames: Map<string, string>;
+};
+
 type PyprojectInfo = {
   name: string | null;
   scripts: PythonScript[];
@@ -327,7 +332,7 @@ function nextFunctionName(lines: string[], start: number): string | null {
 function routePrefixes(sources: Map<string, string>): FastApiPrefixInfo {
   const prefixes = new Map<string, string[]>();
   const sourceFiles = new Set(sources.keys());
-  const aliasesByFile = new Map<string, Map<string, string>>();
+  const aliasesByFile = new Map<string, PythonImportAliases>();
   const includesByFile = new Map<string, ReturnType<typeof includeRouterCalls>>();
   const routerPrefixesByFile = new Map<string, Map<string, string>>();
   const routerMountPrefixesByFile = new Map<string, Map<string, string[]>>();
@@ -342,7 +347,7 @@ function routePrefixes(sources: Map<string, string>): FastApiPrefixInfo {
   for (let pass = 0; pass < sources.size + 1; pass += 1) {
     let changed = false;
     for (const [file, includes] of includesByFile) {
-      const aliases = aliasesByFile.get(file) ?? new Map<string, string>();
+      const aliases = aliasesByFile.get(file) ?? emptyPythonImportAliases();
       const localRouterPrefixes = routerPrefixesByFile.get(file) ?? new Map<string, string>();
       const mounts = routerMountPrefixesByFile.get(file);
       for (const include of includes) {
@@ -358,11 +363,11 @@ function routePrefixes(sources: Map<string, string>): FastApiPrefixInfo {
           if (!include.target.includes(".") && mounts !== undefined) {
             changed = addMapValue(mounts, include.target, fullPrefix) || changed;
           }
-          const moduleFile = aliases.get(include.target.split(".")[0] ?? "");
+          const moduleFile = aliases.files.get(include.target.split(".")[0] ?? "");
           if (moduleFile !== undefined) {
             changed = addMapValue(prefixes, moduleFile, fullPrefix) || changed;
             const moduleMounts = routerMountPrefixesByFile.get(moduleFile);
-            const targetRouter = include.target.split(".")[1] ?? include.target.split(".")[0];
+            const targetRouter = importedRouterName(include.target, aliases);
             if (moduleMounts !== undefined && targetRouter !== undefined) {
               changed = addMapValue(moduleMounts, targetRouter, fullPrefix) || changed;
             }
@@ -389,6 +394,18 @@ function addMapValue(map: Map<string, string[]>, key: string, value: string): bo
   }
   map.set(key, [...values, value]);
   return true;
+}
+
+function emptyPythonImportAliases(): PythonImportAliases {
+  return { files: new Map(), routerNames: new Map() };
+}
+
+function importedRouterName(target: string, aliases: PythonImportAliases): string | undefined {
+  const [localName, routerName] = target.split(".");
+  if (routerName !== undefined) {
+    return routerName;
+  }
+  return localName === undefined ? undefined : (aliases.routerNames.get(localName) ?? localName);
 }
 
 function includeRouterCalls(
@@ -463,8 +480,8 @@ function pythonImportAliases(
   file: string,
   source: string,
   sourceFiles: ReadonlySet<string>,
-): Map<string, string> {
-  const aliases = new Map<string, string>();
+): PythonImportAliases {
+  const aliases = emptyPythonImportAliases();
   for (const match of source.matchAll(/^from\s+([A-Za-z0-9_.]+)\s+import\s+\(([\s\S]*?)\)/gmu)) {
     const moduleName = match[1];
     const imports = match[2];
@@ -488,14 +505,14 @@ function pythonImportAliases(
     const moduleFile =
       moduleName === undefined ? null : resolvePythonModuleFile(file, moduleName, sourceFiles);
     if (alias !== undefined && moduleFile !== null) {
-      aliases.set(alias, moduleFile);
+      aliases.files.set(alias, moduleFile);
     }
   }
   return aliases;
 }
 
 function addPythonImportAliases(
-  aliases: Map<string, string>,
+  aliases: PythonImportAliases,
   currentFile: string,
   moduleName: string,
   imports: string,
@@ -519,7 +536,10 @@ function addPythonImportAliases(
         : (resolvePythonModuleFile(currentFile, nestedModuleName, sourceFiles) ??
           resolvePythonModuleFile(currentFile, moduleName, sourceFiles));
     if (importedFile !== null) {
-      aliases.set(alias, importedFile);
+      aliases.files.set(alias, importedFile);
+      if (importedName === "router" || importedName.endsWith("_router")) {
+        aliases.routerNames.set(alias, importedName);
+      }
     }
   }
 }
