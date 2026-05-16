@@ -39,6 +39,7 @@ type RouteDeclaration = {
 };
 
 const routePathPropRe = /\bpath=(["'])(.*?)\1/su;
+const routeIndexPropRe = /\bindex(?:\s*=\s*\{?true\}?)?/su;
 const routeElementPropRe = /\belement=\{\s*<([A-Z][A-Za-z0-9_]*)/su;
 const lazyImportRe =
   /const\s+([A-Z][A-Za-z0-9_]*)\s*=\s*lazy\(\s*\(\)\s*=>\s*import\(\s*["']([^"']+)["']\s*\)\s*\)/gu;
@@ -255,10 +256,17 @@ function routeDeclarations(source: string): RouteDeclaration[] {
       continue;
     }
     const declaredPath = routePathPropRe.exec(tag.props)?.[2];
+    const isIndexRoute = routeIndexPropRe.test(tag.props);
     const parentPath = pathStack.at(-1) ?? "";
     const path =
-      declaredPath === undefined ? parentPath : joinReactRoutePaths(parentPath, declaredPath);
-    routes.push({ path, component: routeElementPropRe.exec(tag.props)?.[1] ?? null });
+      declaredPath === undefined
+        ? isIndexRoute
+          ? parentPath || "/"
+          : parentPath
+        : joinReactRoutePaths(parentPath, declaredPath);
+    if (declaredPath !== undefined || isIndexRoute) {
+      routes.push({ path, component: routeElementPropRe.exec(tag.props)?.[1] ?? null });
+    }
     if (!tag.selfClosing) {
       pathStack.push(path);
     }

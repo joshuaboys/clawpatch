@@ -401,11 +401,13 @@ describe("mapFeatures", () => {
         "import { lazy } from 'react';",
         "import { Navigate, Route, Routes } from 'react-router-dom';",
         "const CasesPage = lazy(() => import('./pages/CasesPage'));",
+        "import HomePage from './pages/HomePage';",
         "import ReportsPage from './pages/ReportsPage';",
         "import SettingsPage from './pages/SettingsPage';",
         "import UserPage from './pages/UserPage';",
         "export default function App() {",
         "  return <Routes>",
+        "    <Route index element={<HomePage />} />",
         '    <Route path="/" element={<Navigate to="/cases" replace />} />',
         '    <Route path="/cases" element={<CasesPage />} />',
         '    <Route path="/users">',
@@ -426,6 +428,11 @@ describe("mapFeatures", () => {
       root,
       "frontend/src/pages/CasesPage.test.tsx",
       "test('cases page', () => {});\n",
+    );
+    await writeFixture(
+      root,
+      "frontend/src/pages/HomePage.tsx",
+      "export default function HomePage() { return null; }\n",
     );
     await writeFixture(root, "frontend/src/shared/util.test.tsx", "test('util', () => {});\n");
     await writeFixture(
@@ -452,6 +459,7 @@ describe("mapFeatures", () => {
     const project = await detectProject(root);
     const result = await mapFeatures(root, project, []);
     const titles = result.features.map((feature) => feature.title);
+    const home = result.features.find((feature) => feature.title === "React route /");
     const cases = result.features.find((feature) => feature.title === "React route /cases");
     const reports = result.features.find((feature) => feature.title === "React route /reports");
     const settings = result.features.find((feature) => feature.title === "React route /settings");
@@ -459,7 +467,7 @@ describe("mapFeatures", () => {
     const dialog = result.features.find((feature) => feature.title === "React component Dialog");
 
     expect(titles).toContain("Node package fixture-frontend");
-    expect(titles).not.toContain("React route /");
+    expect(home?.entrypoints[0]?.path).toBe("frontend/src/pages/HomePage.tsx");
     expect(cases?.source).toBe("react-router-route");
     expect(cases?.entrypoints[0]?.path).toBe("frontend/src/pages/CasesPage.tsx");
     expect(cases?.contextFiles).toContainEqual({
@@ -1199,10 +1207,22 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
         "from myapp.routes.auth import router as auth_router",
         "from .routes.health import router as health_router",
         "from . import routes",
+        "from .api import router as api_router",
         "app = FastAPI()",
         'app.include_router(auth_router, prefix="/api")',
         "app.include_router(health_router)",
         'app.include_router(routes.router, prefix="/v1")',
+        'app.include_router(api_router, prefix="/nested")',
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "src/myapp/api.py",
+      [
+        "from fastapi import APIRouter",
+        "from .routes.users import router as users_router",
+        "router = APIRouter()",
+        'router.include_router(users_router, prefix="/users")',
       ].join("\n"),
     );
     await writeFixture(
@@ -1238,6 +1258,17 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
         "    return {'ok': True}",
       ].join("\n"),
     );
+    await writeFixture(
+      root,
+      "src/myapp/routes/users.py",
+      [
+        "from fastapi import APIRouter",
+        "router = APIRouter()",
+        '@router.get("/{user_id}")',
+        "def user(user_id: str):",
+        "    return {'id': user_id}",
+      ].join("\n"),
+    );
 
     const project = await detectProject(root);
     const result = await mapFeatures(root, project, []);
@@ -1246,6 +1277,7 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
     expect(titles).toContain("FastAPI route GET /api/users/login");
     expect(titles).toContain("FastAPI route GET /ready");
     expect(titles).toContain("FastAPI route GET /v1/status");
+    expect(titles).toContain("FastAPI route GET /nested/users/{user_id}");
   });
 
   it("resolves Python console scripts and tests from non-src package roots", async () => {

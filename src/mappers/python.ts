@@ -265,28 +265,35 @@ function nextFunctionName(lines: string[], start: number): string | null {
 
 function routePrefixes(root: string, sources: Map<string, string>): Map<string, string> {
   const exportedRouterPrefixes = new Map<string, string>();
-  for (const source of sources.values()) {
-    for (const include of includeRouterCalls(source)) {
-      const parentPrefix =
-        include.receiver === "app" ? "" : (exportedRouterPrefixes.get(include.receiver) ?? "");
-      const fullPrefix = joinRoutePaths(parentPrefix, include.prefix);
-      if (!include.target.includes(".")) {
-        exportedRouterPrefixes.set(include.target, fullPrefix);
-      }
-    }
-  }
   const prefixes = new Map<string, string>();
   const sourceFiles = new Set(sources.keys());
+  const aliasesByFile = new Map<string, Map<string, string>>();
+  const includesByFile = new Map<string, ReturnType<typeof includeRouterCalls>>();
   for (const [file, source] of sources) {
-    const aliases = pythonImportAliases(file, source, sourceFiles);
-    for (const include of includeRouterCalls(source)) {
-      const parentPrefix =
-        include.receiver === "app" ? "" : (exportedRouterPrefixes.get(include.receiver) ?? "");
-      const fullPrefix = joinRoutePaths(parentPrefix, include.prefix);
-      const moduleFile = aliases.get(include.target.split(".")[0] ?? "");
-      if (moduleFile !== undefined) {
-        prefixes.set(moduleFile, fullPrefix);
+    aliasesByFile.set(file, pythonImportAliases(file, source, sourceFiles));
+    includesByFile.set(file, includeRouterCalls(source));
+  }
+  for (let pass = 0; pass < sources.size + 1; pass += 1) {
+    let changed = false;
+    for (const [file, includes] of includesByFile) {
+      const aliases = aliasesByFile.get(file) ?? new Map<string, string>();
+      for (const include of includes) {
+        const parentPrefix =
+          include.receiver === "app"
+            ? ""
+            : (exportedRouterPrefixes.get(include.receiver) ?? prefixes.get(file) ?? "");
+        const fullPrefix = joinRoutePaths(parentPrefix, include.prefix);
+        if (!include.target.includes(".")) {
+          changed = setMapValue(exportedRouterPrefixes, include.target, fullPrefix) || changed;
+        }
+        const moduleFile = aliases.get(include.target.split(".")[0] ?? "");
+        if (moduleFile !== undefined) {
+          changed = setMapValue(prefixes, moduleFile, fullPrefix) || changed;
+        }
       }
+    }
+    if (!changed) {
+      break;
     }
   }
   for (const file of sources.keys()) {
@@ -295,6 +302,14 @@ function routePrefixes(root: string, sources: Map<string, string>): Map<string, 
     }
   }
   return prefixes;
+}
+
+function setMapValue(map: Map<string, string>, key: string, value: string): boolean {
+  if (map.get(key) === value) {
+    return false;
+  }
+  map.set(key, value);
+  return true;
 }
 
 function includeRouterCalls(
