@@ -2203,6 +2203,82 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
     expect(titles).not.toContain("FastAPI route GET /{user_id}");
   });
 
+  it("resolves simple FastAPI include prefix constants", async () => {
+    const root = await fixtureRoot("clawpatch-fastapi-constant-prefix-");
+    await writeFixture(
+      root,
+      "pyproject.toml",
+      '[project]\nname = "api"\ndependencies = ["fastapi"]\n',
+    );
+    await writeFixture(root, "backend/__init__.py", "");
+    await writeFixture(
+      root,
+      "backend/main.py",
+      [
+        "from fastapi import FastAPI",
+        "from backend.users import router",
+        'API_PREFIX = "/api/v1"',
+        "app = FastAPI()",
+        "app.include_router(router, prefix=API_PREFIX)",
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "backend/users.py",
+      [
+        "from fastapi import APIRouter",
+        "router = APIRouter()",
+        '@router.get("/users")',
+        "def users():",
+        "    return []",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(titles).toContain("FastAPI route GET /api/v1/users");
+    expect(titles).not.toContain("FastAPI route GET /users");
+  });
+
+  it("does not map FastAPI routes through unresolved include prefix expressions", async () => {
+    const root = await fixtureRoot("clawpatch-fastapi-unresolved-prefix-");
+    await writeFixture(
+      root,
+      "pyproject.toml",
+      '[project]\nname = "api"\ndependencies = ["fastapi"]\n',
+    );
+    await writeFixture(root, "backend/__init__.py", "");
+    await writeFixture(
+      root,
+      "backend/main.py",
+      [
+        "from fastapi import FastAPI",
+        "from backend.users import router",
+        "app = FastAPI()",
+        'app.include_router(router, prefix=settings.api_prefix + "/v1")',
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "backend/users.py",
+      [
+        "from fastapi import APIRouter",
+        "router = APIRouter()",
+        '@router.get("/users")',
+        "def users():",
+        "    return []",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(titles).not.toContain("FastAPI route GET /users");
+  });
+
   it("applies FastAPI prefixes to dotted router includes in multi-router modules", async () => {
     const root = await fixtureRoot("clawpatch-fastapi-dotted-multi-router-");
     await writeFixture(
