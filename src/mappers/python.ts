@@ -410,6 +410,17 @@ function routePrefixes(sources: Map<string, string>): FastApiPrefixInfo {
       const appReceivers = fastApiAppReceiversByFile.get(file) ?? new Set<string>();
       const receiverCount = fastApiReceiversByFile.get(file)?.size ?? 0;
       for (const include of includes) {
+        if ((blockedRouterMountsByFile.get(file) ?? new Set()).has(include.receiver)) {
+          changed =
+            blockRouterTarget(
+              file,
+              include.target,
+              aliases,
+              aliasesByFile,
+              blockedRouterMountsByFile,
+            ) || changed;
+          continue;
+        }
         const receiverRouterPrefix = localRouterPrefixes.get(include.receiver) ?? "";
         const mountedPrefixes = mounts?.get(include.receiver);
         const filePrefixes = prefixes.get(file);
@@ -424,17 +435,14 @@ function routePrefixes(sources: Map<string, string>): FastApiPrefixInfo {
         }
         for (const parentPrefix of parentPrefixes) {
           if (include.prefix === null) {
-            if (!include.target.includes(".") && mounts !== undefined) {
-              changed = addSetValue(blockedRouterMountsByFile.get(file), include.target) || changed;
-            }
-            const moduleFile = moduleFileForRouterTarget(include.target, aliases);
-            if (moduleFile !== undefined) {
-              const targetRouter = importedRouterName(include.target, aliases);
-              if (targetRouter !== undefined) {
-                changed =
-                  addSetValue(blockedRouterMountsByFile.get(moduleFile), targetRouter) || changed;
-              }
-            }
+            changed =
+              blockRouterTarget(
+                file,
+                include.target,
+                aliases,
+                aliasesByFile,
+                blockedRouterMountsByFile,
+              ) || changed;
             continue;
           }
           const fullPrefix = joinRoutePaths(parentPrefix, include.prefix);
@@ -511,6 +519,39 @@ function addSetValue(set: Set<string> | undefined, value: string): boolean {
   }
   set.add(value);
   return true;
+}
+
+function blockRouterTarget(
+  currentFile: string,
+  target: string,
+  aliases: PythonImportAliases,
+  aliasesByFile: ReadonlyMap<string, PythonImportAliases>,
+  blockedRouterMountsByFile: Map<string, Set<string>>,
+): boolean {
+  let changed = false;
+  if (!target.includes(".")) {
+    changed = addSetValue(blockedRouterMountsByFile.get(currentFile), target) || changed;
+  }
+  const moduleFile = moduleFileForRouterTarget(target, aliases);
+  if (moduleFile === undefined) {
+    return changed;
+  }
+  const targetRouter = importedRouterName(target, aliases);
+  if (targetRouter === undefined) {
+    return changed;
+  }
+  changed = addSetValue(blockedRouterMountsByFile.get(moduleFile), targetRouter) || changed;
+  const moduleAliases = aliasesByFile.get(moduleFile) ?? emptyPythonImportAliases();
+  const exportedFile = moduleFileForRouterTarget(targetRouter, moduleAliases);
+  if (exportedFile === undefined || exportedFile === moduleFile) {
+    return changed;
+  }
+  const exportedRouter = importedRouterName(targetRouter, moduleAliases);
+  return (
+    (exportedRouter === undefined
+      ? false
+      : addSetValue(blockedRouterMountsByFile.get(exportedFile), exportedRouter)) || changed
+  );
 }
 
 function emptyPythonImportAliases(): PythonImportAliases {
