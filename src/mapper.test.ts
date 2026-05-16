@@ -398,9 +398,10 @@ describe("mapFeatures", () => {
       root,
       "frontend/src/App.tsx",
       [
-        "import { lazy, Suspense } from 'react';",
+        "import React, { lazy, Suspense } from 'react';",
         "import { Navigate, Route, Routes } from 'react-router-dom';",
         "const CasesPage = lazy(() => import('./pages/CasesPage'));",
+        "const ReactLazyPage = React.lazy(() => import('./pages/ReactLazyPage'));",
         "import HomePage from './pages/HomePage';",
         "import ReportsPage from './pages/ReportsPage';",
         "import SettingsPage from './pages/SettingsPage';",
@@ -415,6 +416,7 @@ describe("mapFeatures", () => {
         "    <Route index element={<HomePage />} />",
         '    <Route path="/" element={<Navigate to="/cases" replace />} />',
         '    <Route path="/cases" element={<CasesPage />} />',
+        '    <Route path="/react-lazy" element={<ReactLazyPage />} />',
         '    <Route path="/users">',
         '      <Route path=":id" element={<UserPage />} />',
         "    </Route>",
@@ -476,6 +478,11 @@ describe("mapFeatures", () => {
     );
     await writeFixture(
       root,
+      "frontend/src/pages/ReactLazyPage.tsx",
+      "export default function ReactLazyPage() { return null; }\n",
+    );
+    await writeFixture(
+      root,
       "frontend/src/pages/UserPage.tsx",
       "export default function UserPage() { return null; }\n",
     );
@@ -499,6 +506,9 @@ describe("mapFeatures", () => {
     const titles = result.features.map((feature) => feature.title);
     const home = result.features.find((feature) => feature.title === "React route /");
     const cases = result.features.find((feature) => feature.title === "React route /cases");
+    const reactLazy = result.features.find(
+      (feature) => feature.title === "React route /react-lazy",
+    );
     const reports = result.features.find((feature) => feature.title === "React route /reports");
     const settings = result.features.find((feature) => feature.title === "React route /settings");
     const suspense = result.features.find((feature) => feature.title === "React route /suspense");
@@ -521,6 +531,7 @@ describe("mapFeatures", () => {
         command: "pnpm --dir frontend test",
       },
     ]);
+    expect(reactLazy?.entrypoints[0]?.path).toBe("frontend/src/pages/ReactLazyPage.tsx");
     expect(reports?.entrypoints[0]?.path).toBe("frontend/src/pages/ReportsPage.tsx");
     expect(settings?.entrypoints[0]?.path).toBe("frontend/src/pages/SettingsPage.tsx");
     expect(suspense?.entrypoints[0]?.path).toBe("frontend/src/App.tsx");
@@ -1661,6 +1672,49 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
     expect(titles).toContain("FastAPI route GET /public/users");
     expect(titles).toContain("FastAPI route GET /stats");
     expect(titles).not.toContain("FastAPI route GET /public/stats");
+  });
+
+  it("applies FastAPI prefixes to dotted router includes in multi-router modules", async () => {
+    const root = await fixtureRoot("clawpatch-fastapi-dotted-multi-router-");
+    await writeFixture(
+      root,
+      "pyproject.toml",
+      '[project]\nname = "api"\ndependencies = ["fastapi"]\n',
+    );
+    await writeFixture(root, "backend/__init__.py", "");
+    await writeFixture(
+      root,
+      "backend/main.py",
+      [
+        "from fastapi import FastAPI",
+        "from backend import routes",
+        "app = FastAPI()",
+        'app.include_router(routes.router, prefix="/v1")',
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "backend/routes.py",
+      [
+        "from fastapi import APIRouter",
+        "router = APIRouter()",
+        "admin_router = APIRouter()",
+        '@router.get("/status")',
+        "def status():",
+        "    return []",
+        '@admin_router.get("/stats")',
+        "def stats():",
+        "    return []",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(titles).toContain("FastAPI route GET /v1/status");
+    expect(titles).toContain("FastAPI route GET /stats");
+    expect(titles).not.toContain("FastAPI route GET /v1/stats");
   });
 
   it("resolves Python console scripts and tests from non-src package roots", async () => {
