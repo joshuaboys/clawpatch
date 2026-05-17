@@ -2007,17 +2007,10 @@ async function androidVersionCatalogPluginAliases(
   return aliases;
 }
 
-function versionCatalogPaths(buildFile: string, gradleRoot: string): string[] {
-  const paths = new Set<string>();
-  let dir = dirname(buildFile);
-  while (true) {
-    paths.add(dir === "." ? "gradle/libs.versions.toml" : `${dir}/gradle/libs.versions.toml`);
-    if (dir === gradleRoot) {
-      break;
-    }
-    dir = dirname(dir);
-  }
-  return [...paths];
+function versionCatalogPaths(_buildFile: string, gradleRoot: string): string[] {
+  return [
+    gradleRoot === "." ? "gradle/libs.versions.toml" : `${gradleRoot}/gradle/libs.versions.toml`,
+  ];
 }
 
 function parseAndroidPluginAliases(source: string): Set<string> {
