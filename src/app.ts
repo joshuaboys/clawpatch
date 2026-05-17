@@ -1,8 +1,11 @@
-import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { lstat, readlink, writeFile } from "node:fs/promises";
-import { join, relative, resolve } from "node:path";
+import { writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { hostname } from "node:os";
+import {
+  changedPathsBetweenSnapshots,
+  hasSourceDirtyWorktree,
+  sourceChangedSnapshots,
+} from "./change-audit.js";
 import { loadConfig, resolveStateDir, GlobalOptions } from "./config.js";
 import { detectProject } from "./detect.js";
 import { ClawpatchError, assertDefined } from "./errors.js";
@@ -782,9 +785,7 @@ export async function fixCommand(
   }
   const afterChanged =
     (await sourceChangedSnapshots(loaded.root, loaded.paths.stateDir)) ?? new Map();
-  const filesChanged = [...new Set([...beforeChanged.keys(), ...afterChanged.keys()])]
-    .filter((path) => beforeChanged.get(path) !== afterChanged.get(path))
-    .toSorted();
+  const filesChanged = changedPathsBetweenSnapshots(beforeChanged, afterChanged);
   const failed = commandsRun.some((result) => result.exitCode !== 0);
   const patch: PatchAttempt = {
     ...initialPatch,
@@ -1030,93 +1031,6 @@ function parseFindingStatus(value: string): FindingRecord["status"] {
   throw new ClawpatchError(`invalid finding status: ${value}`, 2, "invalid-usage");
 }
 
-async function hasSourceDirtyWorktree(root: string, stateDir: string): Promise<boolean> {
-  const paths = await sourceChangedPaths(root, stateDir);
-  return paths === null || paths.size > 0;
-}
-
-async function sourceChangedPaths(root: string, stateDir: string): Promise<Set<string> | null> {
-  const result = await runCommand("git status --porcelain=v1 -z -uall", root, undefined, {
-    trimOutput: false,
-  });
-  if (result.exitCode !== 0) {
-    return null;
-  }
-  const relativeStateDir = normalizePath(relative(root, stateDir));
-  return new Set(
-    parsePorcelainPaths(result.stdout).filter(
-      (path) => path.length > 0 && !isStatePath(path, relativeStateDir),
-    ),
-  );
-}
-
-async function sourceChangedSnapshots(
-  root: string,
-  stateDir: string,
-): Promise<Map<string, string> | null> {
-  const paths = await sourceChangedPaths(root, stateDir);
-  if (paths === null) {
-    return null;
-  }
-  const snapshots = new Map<string, string>();
-  for (const path of [...paths].toSorted()) {
-    snapshots.set(path, await pathFingerprint(root, path));
-  }
-  return snapshots;
-}
-
-async function pathFingerprint(root: string, path: string): Promise<string> {
-  const full = resolve(root, path);
-  const info = await lstat(full).catch(() => null);
-  if (info === null) {
-    return "missing";
-  }
-  if (info.isSymbolicLink()) {
-    return `symlink:${await readlink(full).catch(() => "unreadable")}`;
-  }
-  if (!info.isFile()) {
-    return `non-file:${info.size}:${Math.trunc(info.mtimeMs)}`;
-  }
-  const hash = createHash("sha256");
-  try {
-    for await (const chunk of createReadStream(full)) {
-      hash.update(chunk);
-    }
-  } catch {
-    return "unreadable";
-  }
-  return `file:${info.mode}:${info.size}:${hash.digest("hex")}`;
-}
-
-function parsePorcelainPaths(output: string): string[] {
-  const fields = output.split("\0").filter((field) => field.length > 0);
-  const paths: string[] = [];
-  for (let index = 0; index < fields.length; index += 1) {
-    const field = fields[index] ?? "";
-    if (field.length < 4) {
-      continue;
-    }
-    const status = field.slice(0, 2);
-    const path = normalizePath(field.slice(3));
-    paths.push(path);
-    if (/[RC]/u.test(status)) {
-      index += 1;
-    }
-  }
-  return paths;
-}
-
-function isStatePath(path: string, relativeStateDir: string): boolean {
-  if (relativeStateDir === "" || relativeStateDir.startsWith("..")) {
-    return false;
-  }
-  return path === relativeStateDir || path.startsWith(`${relativeStateDir}/`);
-}
-
-function normalizePath(path: string): string {
-  return path.replace(/\\/gu, "/").replace(/\/$/u, "");
-}
-
 async function selectReviewFeatures(
   loaded: Awaited<ReturnType<typeof loadProjectState>>,
   flags: Record<string, string | boolean>,
@@ -1245,12 +1159,16 @@ function featurePaths(feature: FeatureRecord): string[] {
     ...feature.ownedFiles.map((file) => file.path),
     ...feature.contextFiles.map((file) => file.path),
     ...feature.tests.map((test) => test.path),
-  ].map(normalizePath);
+  ].map(normalizeFeaturePath);
 }
 
 function normalizeProjectFilter(project: string): string {
-  const normalized = normalizePath(project).replace(/^\.\//u, "");
+  const normalized = normalizeFeaturePath(project).replace(/^\.\//u, "");
   return normalized.length === 0 ? "." : normalized;
+}
+
+function normalizeFeaturePath(path: string): string {
+  return path.replace(/\\/gu, "/").replace(/\/$/u, "");
 }
 
 function featureReviewRank(left: FeatureRecord, right: FeatureRecord): number {
