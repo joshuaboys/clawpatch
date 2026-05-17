@@ -50,6 +50,7 @@ This discovers reviewable features:
 - JVM semantic role groups
 - Ruby packages, Rails apps, executables, and tests
 - Rust crates and binaries
+- C/C++ standalone binaries and CMake/autotools targets
 - SwiftPM targets and tests
 - Laravel controllers, requests, jobs, commands, services, models, migrations, and tests
 - Config files

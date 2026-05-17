@@ -44,6 +44,7 @@ Supported deterministic mappers today:
 - Ruby project metadata, executables, source groups, RSpec/Minitest suites,
   Rails configs, routes, views, assets, and database files
 - Rust Cargo commands, libraries, workspace crates, and integration tests
+- C/C++ standalone `main()` files, CMake targets, and autotools targets
 - SwiftPM executable targets, library targets, and test suites
 - nested SwiftPM packages
 - Apple/Xcode projects from `project.yml`, `.xcodeproj`, or `.xcworkspace`
@@ -95,6 +96,11 @@ external clients, configuration, framework components, extension boundaries,
 Android UI entrypoints, ViewModels, data boundaries, or dependency injection.
 Kotlin dependency-injection evidence includes Hilt, Dagger, Koin, and Metro
 annotations and imports.
+
+C/C++ mapping covers generic project shapes only: standalone source files with
+`main()`, CMake `add_executable` / `add_library`, and autotools `bin_PROGRAMS` /
+`lib_LTLIBRARIES`. It deliberately avoids project-specific C dialects such as
+php-src extension metadata.
 
 Python mapping covers `pyproject.toml`, `setup.cfg`, `setup.py`, and
 `requirements.txt` metadata; `[project.scripts]`, `[tool.poetry.scripts]`,

@@ -63,6 +63,8 @@ validation commands and records a patch attempt under `.clawpatch/`.
 - Ruby project metadata, executables, source groups, RSpec/Minitest suites
 - Rust `src/main.rs`, `src/bin/*.rs`, `src/lib.rs`, `crates/*`, and
   `tests/*.rs`
+- C/C++ standalone `main()` files, CMake `add_executable` / `add_library`
+  targets, and autotools `bin_PROGRAMS` / `lib_LTLIBRARIES` targets
 - Python project metadata, console scripts, bounded source groups, pytest suites,
   and Flask/FastAPI routes
 - SwiftPM `Sources/*` targets and `Tests/*` suites

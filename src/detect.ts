@@ -304,6 +304,19 @@ async function detectPackageManagers(root: string): Promise<string[]> {
   ) {
     found.push("gradle");
   }
+  if (
+    !found.includes("cmake") &&
+    (await containsFileNamed(root, "CMakeLists.txt", 5, shouldSkipCOrCppSearchEntry))
+  ) {
+    found.push("cmake");
+  }
+  if (
+    !found.includes("autotools") &&
+    ((await containsFileNamed(root, "Makefile.am", 5, shouldSkipCOrCppSearchEntry)) ||
+      (await containsFileNamed(root, "Makefile.in", 5, shouldSkipCOrCppSearchEntry)))
+  ) {
+    found.push("autotools");
+  }
   if (await pathExists(join(root, "composer.json"))) {
     found.push("composer");
   }
@@ -978,10 +991,33 @@ async function detectLanguages(root: string): Promise<string[]> {
   ) {
     languages.push("kotlin");
   }
+  if (!languages.includes("c") && (await containsCFile(root))) {
+    languages.push("c");
+  }
+  if (!languages.includes("cpp") && (await containsCppFile(root))) {
+    languages.push("cpp");
+  }
   if (!languages.includes("php") && (await containsReviewablePhpFile(root))) {
     languages.push("php");
   }
   return languages;
+}
+
+async function containsCFile(root: string): Promise<boolean> {
+  return containsFileWithExtension(root, ".c", 5, shouldSkipCOrCppSearchEntry);
+}
+
+async function containsCppFile(root: string): Promise<boolean> {
+  return (
+    (await containsFileWithExtension(root, ".C", 5, shouldSkipCOrCppSearchEntry)) ||
+    (await containsFileWithExtension(root, ".H", 5, shouldSkipCOrCppSearchEntry)) ||
+    (await containsFileWithExtensionIgnoringCase(root, ".cpp", 5, shouldSkipCOrCppSearchEntry)) ||
+    (await containsFileWithExtensionIgnoringCase(root, ".cc", 5, shouldSkipCOrCppSearchEntry)) ||
+    (await containsFileWithExtensionIgnoringCase(root, ".cxx", 5, shouldSkipCOrCppSearchEntry)) ||
+    (await containsFileWithExtensionIgnoringCase(root, ".hpp", 5, shouldSkipCOrCppSearchEntry)) ||
+    (await containsFileWithExtensionIgnoringCase(root, ".hh", 5, shouldSkipCOrCppSearchEntry)) ||
+    (await containsFileWithExtensionIgnoringCase(root, ".hxx", 5, shouldSkipCOrCppSearchEntry))
+  );
 }
 
 const jvmSourceSearchRoots = ["src", "app", "apps", "lib"] as const;
@@ -996,7 +1032,7 @@ async function containsReviewableKotlinFile(root: string): Promise<boolean> {
 
 async function containsReviewableJvmFile(root: string, extension: string): Promise<boolean> {
   for (const prefix of jvmSourceSearchRoots) {
-    if (await containsFileWithExtension(join(root, prefix), extension, 8)) {
+    if (await containsFileWithExtension(join(root, prefix), extension, 8, undefined, prefix)) {
       return true;
     }
   }
@@ -1031,7 +1067,15 @@ async function containsReviewablePythonFile(root: string): Promise<boolean> {
     return true;
   }
   for (const prefix of pythonSourceSearchRoots) {
-    if (await containsFileMatching(join(root, prefix), 4, isReviewablePythonFileName)) {
+    if (
+      await containsFileMatching(
+        join(root, prefix),
+        4,
+        isReviewablePythonFileName,
+        undefined,
+        prefix,
+      )
+    ) {
       return true;
     }
   }
@@ -1040,7 +1084,7 @@ async function containsReviewablePythonFile(root: string): Promise<boolean> {
 
 async function containsReviewablePhpFile(root: string): Promise<boolean> {
   for (const prefix of ["app", "routes", "config", "database", "tests"]) {
-    if (await containsFileWithExtension(join(root, prefix), ".php", 4)) {
+    if (await containsFileWithExtension(join(root, prefix), ".php", 4, undefined, prefix)) {
       return true;
     }
   }
@@ -1089,7 +1133,7 @@ async function pythonFrameworkScanFiles(root: string): Promise<string[]> {
     }
   }
   for (const prefix of pythonSourceSearchRoots) {
-    await collectPythonFrameworkScanFiles(join(root, prefix), 4, files);
+    await collectPythonFrameworkScanFiles(join(root, prefix), 4, files, prefix);
   }
   return [...new Set(files)].slice(0, 200);
 }
@@ -1098,6 +1142,7 @@ async function collectPythonFrameworkScanFiles(
   dir: string,
   remainingDepth: number,
   files: string[],
+  relativeDir = "",
 ): Promise<void> {
   if (remainingDepth < 0 || !(await pathExists(dir))) {
     return;
@@ -1107,7 +1152,8 @@ async function collectPythonFrameworkScanFiles(
     return;
   }
   for (const entry of await readdir(dir, { withFileTypes: true })) {
-    if (shouldSkipSearchEntry(entry.name)) {
+    const path = relativeDir === "" ? entry.name : `${relativeDir}/${entry.name}`;
+    if (shouldSkipSearchEntry(entry.name, path)) {
       continue;
     }
     const full = join(dir, entry.name);
@@ -1117,7 +1163,7 @@ async function collectPythonFrameworkScanFiles(
     if (entry.isFile() && isReviewablePythonFileName(entry.name)) {
       files.push(full);
     } else if (entry.isDirectory()) {
-      await collectPythonFrameworkScanFiles(full, remainingDepth - 1, files);
+      await collectPythonFrameworkScanFiles(full, remainingDepth - 1, files, path);
     }
   }
 }
@@ -1127,12 +1173,14 @@ async function containsReviewableRubyFile(root: string): Promise<boolean> {
     return true;
   }
   for (const prefix of ["app", "lib"]) {
-    if (await containsFileMatching(join(root, prefix), 4, isReviewableRubyFileName)) {
+    if (
+      await containsFileMatching(join(root, prefix), 4, isReviewableRubyFileName, undefined, prefix)
+    ) {
       return true;
     }
   }
   for (const prefix of ["scripts", "script", "exe", "bin"]) {
-    if (await containsRubyExecutableSource(join(root, prefix), 4)) {
+    if (await containsRubyExecutableSource(join(root, prefix), 4, prefix)) {
       return true;
     }
   }
@@ -1152,7 +1200,11 @@ function isRootReviewableRubyFileName(entry: string): boolean {
   return isReviewableRubyFileName(entry) && !entry.startsWith("test_");
 }
 
-async function containsRubyExecutableSource(dir: string, remainingDepth: number): Promise<boolean> {
+async function containsRubyExecutableSource(
+  dir: string,
+  remainingDepth: number,
+  relativeDir = "",
+): Promise<boolean> {
   if (remainingDepth < 0 || !(await pathExists(dir))) {
     return false;
   }
@@ -1161,7 +1213,8 @@ async function containsRubyExecutableSource(dir: string, remainingDepth: number)
     return false;
   }
   for (const entry of await readdir(dir)) {
-    if (shouldSkipSearchEntry(entry)) {
+    const path = relativeDir === "" ? entry : `${relativeDir}/${entry}`;
+    if (shouldSkipSearchEntry(entry, path)) {
       continue;
     }
     const full = join(dir, entry);
@@ -1176,7 +1229,10 @@ async function containsRubyExecutableSource(dir: string, remainingDepth: number)
     ) {
       return true;
     }
-    if (info.isDirectory() && (await containsRubyExecutableSource(full, remainingDepth - 1))) {
+    if (
+      info.isDirectory() &&
+      (await containsRubyExecutableSource(full, remainingDepth - 1, path))
+    ) {
       return true;
     }
   }
@@ -1241,22 +1297,54 @@ async function containsRubyPrefixedMinitestFile(
   return false;
 }
 
-async function containsFileNamed(root: string, name: string, maxDepth: number): Promise<boolean> {
-  return containsFileMatching(root, maxDepth, (entry) => entry === name);
+async function containsFileNamed(
+  root: string,
+  name: string,
+  maxDepth: number,
+  skipEntry: (entry: string, relativePath: string) => boolean = shouldSkipSearchEntry,
+): Promise<boolean> {
+  return containsFileMatching(root, maxDepth, (entry) => entry === name, skipEntry);
 }
 
 async function containsFileWithExtension(
   root: string,
   extension: string,
   maxDepth: number,
+  skipEntry: (entry: string, relativePath: string) => boolean = shouldSkipSearchEntry,
+  relativeDir = "",
 ): Promise<boolean> {
-  return containsFileMatching(root, maxDepth, (entry) => entry.endsWith(extension));
+  return containsFileMatching(
+    root,
+    maxDepth,
+    (entry) => entry.endsWith(extension),
+    skipEntry,
+    relativeDir,
+  );
+}
+
+async function containsFileWithExtensionIgnoringCase(
+  root: string,
+  extension: string,
+  maxDepth: number,
+  skipEntry: (entry: string, relativePath: string) => boolean = shouldSkipSearchEntry,
+  relativeDir = "",
+): Promise<boolean> {
+  const lowercaseExtension = extension.toLowerCase();
+  return containsFileMatching(
+    root,
+    maxDepth,
+    (entry) => entry.toLowerCase().endsWith(lowercaseExtension),
+    skipEntry,
+    relativeDir,
+  );
 }
 
 async function containsFileMatching(
   dir: string,
   remainingDepth: number,
   predicate: (entry: string) => boolean,
+  skipEntry: (entry: string, relativePath: string) => boolean = shouldSkipSearchEntry,
+  relativeDir = "",
 ): Promise<boolean> {
   if (remainingDepth < 0 || !(await pathExists(dir))) {
     return false;
@@ -1266,7 +1354,8 @@ async function containsFileMatching(
     return false;
   }
   for (const entry of await readdir(dir)) {
-    if (shouldSkipSearchEntry(entry)) {
+    const relativePath = relativeDir.length === 0 ? entry : `${relativeDir}/${entry}`;
+    if (skipEntry(entry, relativePath)) {
       continue;
     }
     const full = join(dir, entry);
@@ -1277,14 +1366,20 @@ async function containsFileMatching(
     if (info.isFile() && predicate(entry)) {
       return true;
     }
-    if (info.isDirectory() && (await containsFileMatching(full, remainingDepth - 1, predicate))) {
+    if (
+      info.isDirectory() &&
+      (await containsFileMatching(full, remainingDepth - 1, predicate, skipEntry, relativePath))
+    ) {
       return true;
     }
   }
   return false;
 }
 
-function shouldSkipSearchEntry(entry: string): boolean {
+function shouldSkipSearchEntry(entry: string, relativePath = entry): boolean {
+  if (entry === "vendor" && relativePath === "vendor") {
+    return true;
+  }
   return [
     "node_modules",
     "dist",
@@ -1302,7 +1397,6 @@ function shouldSkipSearchEntry(entry: string): boolean {
     ".ruff_cache",
     ".pytest_cache",
     ".bundle",
-    "vendor",
     "fixtures",
     "__fixtures__",
     "testdata",
@@ -1311,6 +1405,15 @@ function shouldSkipSearchEntry(entry: string): boolean {
     "SourcePackages",
     "DerivedData",
   ].includes(entry);
+}
+
+function shouldSkipCOrCppSearchEntry(entry: string): boolean {
+  return (
+    shouldSkipSearchEntry(entry) ||
+    entry === "vendor" ||
+    entry === "CMakeFiles" ||
+    /^cmake-build-[^/]+$/u.test(entry)
+  );
 }
 
 function stripLineComments(source: string, marker: "//"): string {

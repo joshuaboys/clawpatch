@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added generic C/C++ feature mapping for standalone `main()` files, CMake `add_executable` / `add_library` targets, and autotools `bin_PROGRAMS` / `lib_LTLIBRARIES` targets, thanks @iliaal.
 - Added security ownership, CodeQL, Dependabot, dependency review, and a private disclosure policy for repository automation and package integrity, plus fixed the first CodeQL mapper sanitizer finding.
 - Added JVM semantic role mapping from Java annotations, imports, inheritance, interfaces, and method signatures.
 - Added Ruby and Rails feature mapping while excluding legacy Rails secrets from reviewable config, thanks @inertia186.
