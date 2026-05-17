@@ -956,6 +956,11 @@ export async function openPrCommand(
       runCommandArgs("git", ["rev-parse", "HEAD"], git.root),
     );
     commitSha = commit.stdout.trim();
+    await writePatchPrGitState(loaded.paths, patch, {
+      commitSha,
+      branchName: branch,
+      prUrl: patch.git.prUrl,
+    });
   }
   await checkedRun("git push", runCommandArgs("git", ["push", "-u", "origin", branch], git.root));
   const ghArgs = [
@@ -975,16 +980,7 @@ export async function openPrCommand(
   }
   const gh = await checkedRun("gh pr create", runCommandArgs(githubCli(), ghArgs, git.root, body));
   const prUrl = firstUrl(gh.stdout) ?? gh.stdout.trim();
-  await writePatchAttempt(loaded.paths, {
-    ...patch,
-    git: {
-      ...patch.git,
-      commitSha,
-      branchName: branch,
-      prUrl,
-    },
-    updatedAt: nowIso(),
-  });
+  await writePatchPrGitState(loaded.paths, patch, { commitSha, branchName: branch, prUrl });
   return {
     patchAttempt: patch.patchAttemptId,
     branch,
@@ -993,6 +989,23 @@ export async function openPrCommand(
     pr: prUrl,
     next: prUrl.length > 0 ? prUrl : "inspect GitHub CLI output",
   };
+}
+
+async function writePatchPrGitState(
+  paths: ReturnType<typeof statePaths>,
+  patch: PatchAttempt,
+  git: { commitSha: string; branchName: string; prUrl: string | null },
+): Promise<void> {
+  await writePatchAttempt(paths, {
+    ...patch,
+    git: {
+      ...patch.git,
+      commitSha: git.commitSha,
+      branchName: git.branchName,
+      prUrl: git.prUrl,
+    },
+    updatedAt: nowIso(),
+  });
 }
 
 export async function doctorCommand(
@@ -1322,7 +1335,7 @@ async function assertPatchWorktree(
     }),
   );
   const dirty = gitStatusPaths(status.stdout);
-  const statePrefix = normalizePath(relative(gitRoot, stateDir));
+  const statePrefix = gitRelativePathPrefix(gitRoot, stateDir);
   const sourceDirty = dirty.filter((file) => !isStatePath(file, statePrefix));
   if (sourceDirty.length === 0) {
     throw new ClawpatchError("no uncommitted patch changes to commit", 2, "invalid-input");
@@ -1360,6 +1373,26 @@ function isStatePath(file: string, statePrefix: string): boolean {
   return statePrefix.length > 0 && (file === statePrefix || file.startsWith(`${statePrefix}/`));
 }
 
+function gitRelativePathPrefix(gitRoot: string, path: string): string {
+  const direct = normalizePath(relative(gitRoot, path));
+  if (isUsableRelativePrefix(direct)) {
+    return direct;
+  }
+  const normalizedGitRoot = normalizeDarwinPrivateVar(gitRoot);
+  const normalizedPath = normalizeDarwinPrivateVar(path);
+  if (normalizedPath === normalizedGitRoot) {
+    return "";
+  }
+  if (normalizedPath.startsWith(`${normalizedGitRoot}/`)) {
+    return normalizedPath.slice(normalizedGitRoot.length + 1);
+  }
+  return direct;
+}
+
+function isUsableRelativePrefix(path: string): boolean {
+  return path.length > 0 && path !== "." && path !== ".." && !path.startsWith("../");
+}
+
 async function checkedRun(label: string, resultPromise: Promise<CommandResult>): Promise<CommandResult> {
   const result = await resultPromise;
   if (result.exitCode !== 0) {
@@ -1382,6 +1415,10 @@ function firstUrl(output: string): string | null {
 
 function normalizePath(path: string): string {
   return path.replace(/\\/gu, "/");
+}
+
+function normalizeDarwinPrivateVar(path: string): string {
+  return normalizePath(path).replace(/^\/private\/var\//u, "/var/");
 }
 
 function providerOptions(config: ReturnType<typeof applyProviderFlags>) {

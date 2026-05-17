@@ -104,9 +104,16 @@ function assertQuote(
   if (quote === null || quote.trim().length === 0) {
     return;
   }
+  const target =
+    evidence.startLine !== null && evidence.endLine !== null
+      ? contents
+          .split("\n")
+          .slice(evidence.startLine - 1, evidence.endLine)
+          .join("\n")
+      : contents;
   if (
-    !contents.includes(quote) &&
-    !compactWhitespace(contents).includes(compactWhitespace(quote))
+    !target.includes(quote) &&
+    !compactWhitespace(target).includes(compactWhitespace(quote))
   ) {
     throwMalformed(`evidence quote does not match file contents: ${evidence.path}`);
   }

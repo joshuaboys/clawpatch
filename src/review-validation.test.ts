@@ -46,6 +46,24 @@ describe("validateReviewOutput", () => {
       ),
     ).rejects.toMatchObject({ code: "malformed-output" });
   });
+
+  it("rejects quotes that only match outside the cited line range", async () => {
+    const root = await fixtureRoot("clawpatch-review-validation-line-quote-");
+    await writeFixture(
+      root,
+      "src/index.ts",
+      "const first = 'TODO_BUG';\nconst second = 'safe';\n",
+    );
+
+    await expect(
+      validateReviewOutput(
+        root,
+        feature("src/index.ts"),
+        defaultConfig(),
+        output("src/index.ts", { startLine: 2, endLine: 2, quote: "TODO_BUG" }),
+      ),
+    ).rejects.toMatchObject({ code: "malformed-output" });
+  });
 });
 
 function feature(path: string): FeatureRecord {
