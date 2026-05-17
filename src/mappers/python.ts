@@ -1,6 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { pathExists } from "../fs.js";
+import { partitionFileGroups } from "./grouping.js";
 import {
   isSafeDirectory,
   isSafeFile,
@@ -11,6 +12,7 @@ import {
   walk,
 } from "./shared.js";
 import { FeatureSeed, SeedFileRef, SeedTestRef } from "./types.js";
+import type { FileGroup } from "./grouping.js";
 
 type PythonScript = {
   name: string;
@@ -30,11 +32,6 @@ type FastApiRoute = {
   functionName: string;
   routePath: string;
   methods: string[];
-};
-
-type SourceGroup = {
-  label: string;
-  files: string[];
 };
 
 type PyprojectInfo = {
@@ -276,8 +273,8 @@ async function dependencyFileHas(root: string, dependency: string): Promise<bool
   return false;
 }
 
-async function pythonSourceGroups(root: string): Promise<SourceGroup[]> {
-  const groups: SourceGroup[] = [];
+async function pythonSourceGroups(root: string): Promise<FileGroup[]> {
+  const groups: FileGroup[] = [];
   groups.push(...(await rootPythonSourceGroups(root)));
   const seenRoots = new Set<string>();
   for (const sourceRoot of await pythonSourceRoots(root)) {
@@ -286,15 +283,15 @@ async function pythonSourceGroups(root: string): Promise<SourceGroup[]> {
     }
     seenRoots.add(sourceRoot);
     const files = (await walk(root, [sourceRoot])).filter(isReviewablePythonSourceFile);
-    for (const group of partitionSourceFiles(sourceRoot, files, sourceGroupMaxOwnedFiles)) {
+    for (const group of partitionFileGroups(sourceRoot, files, sourceGroupMaxOwnedFiles)) {
       groups.push(group);
     }
   }
   return groups;
 }
 
-async function rootPythonSourceGroups(root: string): Promise<SourceGroup[]> {
-  return chunkFiles("root", await rootPythonSourceFiles(root), sourceGroupMaxOwnedFiles);
+async function rootPythonSourceGroups(root: string): Promise<FileGroup[]> {
+  return partitionFileGroups("root", await rootPythonSourceFiles(root), sourceGroupMaxOwnedFiles);
 }
 
 async function rootPythonSourceFiles(root: string): Promise<string[]> {
@@ -772,9 +769,9 @@ function standaloneTestSuites(testFiles: string[], command: string | null): Feat
   if (testFiles.length === 0) {
     return [];
   }
-  const groups: SourceGroup[] = [];
+  const groups: FileGroup[] = [];
   for (const [root, files] of groupedTestFiles(testFiles)) {
-    groups.push(...partitionSourceFiles(root, files, sourceGroupMaxOwnedFiles));
+    groups.push(...partitionFileGroups(root, files, sourceGroupMaxOwnedFiles));
   }
   return groups.map((group) => ({
     title: `Python test suite ${group.label}`,
@@ -816,115 +813,6 @@ function testSuiteRoot(path: string): string {
     return first;
   }
   return dirname(path);
-}
-
-function partitionSourceFiles(
-  sourceRoot: string,
-  files: string[],
-  maxFiles: number,
-): SourceGroup[] {
-  return partitionAt(sourceRoot, files.toSorted(), maxFiles, 0);
-}
-
-function partitionAt(
-  sourceRoot: string,
-  files: string[],
-  maxFiles: number,
-  depth: number,
-): SourceGroup[] {
-  if (files.length === 0) {
-    return [];
-  }
-  if (files.length <= maxFiles) {
-    return [{ label: commonLabel(sourceRoot, files, depth), files }];
-  }
-  const directFiles: string[] = [];
-  const buckets = new Map<string, string[]>();
-  for (const file of files) {
-    const relativePath = file.slice(sourceRoot.length + 1);
-    const parts = relativePath.split("/");
-    if (parts.length <= depth + 1) {
-      directFiles.push(file);
-      continue;
-    }
-    const segment = parts[depth];
-    if (segment === undefined) {
-      directFiles.push(file);
-      continue;
-    }
-    const bucket = buckets.get(segment) ?? [];
-    bucket.push(file);
-    buckets.set(segment, bucket);
-  }
-  const groups = chunkFiles(currentLabel(sourceRoot, files, depth), directFiles, maxFiles);
-  for (const [segment, bucketFiles] of [...buckets.entries()].toSorted(([left], [right]) =>
-    left.localeCompare(right),
-  )) {
-    if (bucketFiles.length <= maxFiles) {
-      groups.push({
-        label: `${sourceRoot}/${bucketPrefix(bucketFiles, sourceRoot, depth, segment)}`,
-        files: bucketFiles,
-      });
-    } else {
-      groups.push(...partitionAt(sourceRoot, bucketFiles, maxFiles, depth + 1));
-    }
-  }
-  return groups;
-}
-
-function chunkFiles(label: string, files: string[], maxFiles: number): SourceGroup[] {
-  const groups: SourceGroup[] = [];
-  for (let index = 0; index < files.length; index += maxFiles) {
-    const part = Math.floor(index / maxFiles) + 1;
-    groups.push({
-      label: files.length <= maxFiles ? label : `${label}#${part}`,
-      files: files.slice(index, index + maxFiles),
-    });
-  }
-  return groups;
-}
-
-function currentLabel(sourceRoot: string, files: string[], depth: number): string {
-  if (depth === 0) {
-    return sourceRoot;
-  }
-  const first = files[0];
-  if (first === undefined) {
-    return sourceRoot;
-  }
-  const parts = first
-    .slice(sourceRoot.length + 1)
-    .split("/")
-    .slice(0, depth);
-  return parts.length === 0 ? sourceRoot : `${sourceRoot}/${parts.join("/")}`;
-}
-
-function commonLabel(sourceRoot: string, files: string[], depth: number): string {
-  if (depth === 0) {
-    if (sourceRoot === "tests") {
-      return sourceRoot;
-    }
-    const first = files[0];
-    return files.length === 1 && first !== undefined && !first.startsWith(`${sourceRoot}/`)
-      ? first
-      : sourceRoot;
-  }
-  if (files.length === 1) {
-    return files[0] ?? sourceRoot;
-  }
-  return currentLabel(sourceRoot, files, depth);
-}
-
-function bucketPrefix(files: string[], sourceRoot: string, depth: number, segment: string): string {
-  const first = files[0];
-  if (first === undefined || depth === 0) {
-    return segment;
-  }
-  const parts = first
-    .slice(sourceRoot.length + 1)
-    .split("/")
-    .slice(0, depth);
-  return [...parts, segment].join("/");
 }
 
 function associatedTests(files: string[], tests: string[], command: string | null): SeedTestRef[] {

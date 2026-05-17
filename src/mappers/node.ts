@@ -3,6 +3,7 @@ import { basename, dirname, extname, join } from "node:path";
 import { packageBins, packageScripts } from "../detect.js";
 import { pathExists } from "../fs.js";
 import { rubyDependencyNames, rubyGemspecPaths, stripRubyComments } from "../ruby.js";
+import { partitionFileGroups } from "./grouping.js";
 import {
   normalize,
   packageKind,
@@ -30,11 +31,6 @@ import {
 type PackageInfo = NodeProjectInfo & {
   packageJsonPath: string;
   packageJson: NodePackageJson;
-};
-
-type SourceGroup = {
-  label: string;
-  files: string[];
 };
 
 const sourceDirectories = ["src", "lib", "app", "pages", "scripts"] as const;
@@ -172,7 +168,7 @@ async function sourceGroupSeeds(
     if (files.length === 0) {
       continue;
     }
-    for (const group of partitionSourceFiles(sourceRoot, files, sourceGroupMaxOwnedFiles)) {
+    for (const group of partitionFileGroups(sourceRoot, files, sourceGroupMaxOwnedFiles)) {
       const tests = associatedTests(group.files, testFiles, testCommand ?? null);
       seeds.push({
         title: `Node source ${group.label}`,
@@ -274,126 +270,6 @@ async function hasRailsDependency(root: string): Promise<boolean> {
     chunks.push(await readFile(join(root, path), "utf8"));
   }
   return rubyDependencyNames(stripRubyComments(chunks.join("\n"))).has("rails");
-}
-
-function partitionSourceFiles(
-  sourceRoot: string,
-  files: string[],
-  maxFiles: number,
-): SourceGroup[] {
-  return partitionAt(sourceRoot, files.toSorted(), maxFiles, 0);
-}
-
-function partitionAt(
-  sourceRoot: string,
-  files: string[],
-  maxFiles: number,
-  depth: number,
-): SourceGroup[] {
-  if (files.length <= maxFiles) {
-    return [{ label: commonLabel(sourceRoot, files, depth), files }];
-  }
-
-  const directFiles: string[] = [];
-  const buckets = new Map<string, string[]>();
-  for (const file of files) {
-    const relativePath = file.slice(sourceRoot.length + 1);
-    const parts = relativePath.split("/");
-    if (parts.length <= depth + 1) {
-      directFiles.push(file);
-      continue;
-    }
-    const segment = parts[depth];
-    if (segment === undefined) {
-      directFiles.push(file);
-      continue;
-    }
-    const bucket = buckets.get(segment) ?? [];
-    bucket.push(file);
-    buckets.set(segment, bucket);
-  }
-
-  if (buckets.size === 0) {
-    return chunkFiles(currentLabel(sourceRoot, files, depth), files, maxFiles);
-  }
-
-  const groups = chunkFiles(currentLabel(sourceRoot, files, depth), directFiles, maxFiles);
-  for (const [segment, bucketFiles] of [...buckets.entries()].toSorted(([left], [right]) =>
-    left.localeCompare(right),
-  )) {
-    if (bucketFiles.length <= maxFiles) {
-      groups.push({
-        label: `${sourceRoot}/${bucketPrefix(bucketFiles, sourceRoot, depth, segment)}`,
-        files: bucketFiles,
-      });
-    } else {
-      groups.push(...partitionAt(sourceRoot, bucketFiles, maxFiles, depth + 1));
-    }
-  }
-  return groups;
-}
-
-function chunkFiles(label: string, files: string[], maxFiles: number): SourceGroup[] {
-  if (files.length === 0) {
-    return [];
-  }
-  if (files.length <= maxFiles) {
-    return [{ label, files }];
-  }
-  const chunks: SourceGroup[] = [];
-  for (let index = 0; index < files.length; index += maxFiles) {
-    const part = Math.floor(index / maxFiles) + 1;
-    chunks.push({
-      label: `${label}#${part}`,
-      files: files.slice(index, index + maxFiles),
-    });
-  }
-  return chunks;
-}
-
-function currentLabel(sourceRoot: string, files: string[], depth: number): string {
-  if (depth === 0) {
-    return sourceRoot;
-  }
-  const first = files[0];
-  if (first === undefined) {
-    return sourceRoot;
-  }
-  const parts = first
-    .slice(sourceRoot.length + 1)
-    .split("/")
-    .slice(0, depth);
-  return parts.length === 0 ? sourceRoot : `${sourceRoot}/${parts.join("/")}`;
-}
-
-function commonLabel(sourceRoot: string, files: string[], depth: number): string {
-  if (depth === 0) {
-    return sourceRoot;
-  }
-  if (files.length === 1) {
-    return files[0] ?? sourceRoot;
-  }
-  const first = files[0];
-  if (first === undefined) {
-    return sourceRoot;
-  }
-  const parts = first
-    .slice(sourceRoot.length + 1)
-    .split("/")
-    .slice(0, depth);
-  return parts.length === 0 ? sourceRoot : `${sourceRoot}/${parts.join("/")}`;
-}
-
-function bucketPrefix(files: string[], sourceRoot: string, depth: number, segment: string): string {
-  const first = files[0];
-  if (first === undefined || depth === 0) {
-    return segment;
-  }
-  const parts = first
-    .slice(sourceRoot.length + 1)
-    .split("/")
-    .slice(0, depth);
-  return [...parts, segment].join("/");
 }
 
 function associatedTests(files: string[], tests: string[], command: string | null): SeedTestRef[] {
