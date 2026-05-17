@@ -8,6 +8,7 @@
 - Added `--skip-git-repo-check` for Codex-backed map, review, fix, and revalidate commands so initialized non-Git roots can run Codex, thanks @im-zayan.
 - Added deterministic Express, Fastify, and Hono route mapping for Node projects, thanks @rohitjavvadi.
 - Added `clawpatch ci` to initialize, map, review, write a report, and append a GitHub Actions step summary in one CI-friendly command.
+- Added `clawpatch open-pr --patch <id>` to turn an applied patch attempt into an explicit GitHub pull request.
 - Hardened review ingestion so provider findings must cite included files with valid line ranges and matching evidence quotes.
 - Fixed provider commands with relative `--root` paths by canonicalizing explicit roots before invoking Codex or other providers.
 - Added first-pass Elixir Mix/Phoenix mapping for project metadata, contexts, Phoenix web slices, runtime config, Ecto migrations, project scripts, ExUnit tests, and Mix validation defaults, thanks @tears-mysthrala.
