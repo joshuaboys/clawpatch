@@ -4,6 +4,32 @@ import { ClawpatchConfig, FeatureRecord, FindingRecord, ProjectRecord } from "./
 
 export type ReviewMode = "default" | "deslopify";
 
+export type ReviewPromptFileRole = "owned" | "context";
+
+export type ReviewPromptFileManifest = {
+  path: string;
+  role: ReviewPromptFileRole;
+  bytes: number;
+  includedBytes: number;
+  truncated: boolean;
+  readable: boolean;
+  skippedReason: string | null;
+};
+
+export type ReviewPromptManifest = {
+  maxOwnedFiles: number;
+  maxContextFiles: number;
+  includedFiles: ReviewPromptFileManifest[];
+  omittedFiles: Array<{ path: string; role: ReviewPromptFileRole; reason: string }>;
+  promptBytes: number;
+  approximateTokens: number;
+};
+
+export type ReviewPromptBundle = {
+  prompt: string;
+  manifest: ReviewPromptManifest;
+};
+
 export function buildAgentMapPrompt(project: ProjectRecord, inventory: unknown): string {
   return `You are mapping a repository into semantic clawpatch review slices.
 
@@ -61,13 +87,55 @@ export async function buildReviewPrompt(
   config: ClawpatchConfig,
   mode: ReviewMode = "default",
 ): Promise<string> {
+  return (await buildReviewPromptBundle(root, project, feature, config, mode)).prompt;
+}
+
+export async function buildReviewPromptBundle(
+  root: string,
+  project: ProjectRecord,
+  feature: FeatureRecord,
+  config: ClawpatchConfig,
+  mode: ReviewMode = "default",
+): Promise<ReviewPromptBundle> {
   const owned = feature.ownedFiles.slice(0, config.review.maxOwnedFiles);
   const context = feature.contextFiles.slice(0, config.review.maxContextFiles);
+  const omittedFiles = [
+    ...feature.ownedFiles.slice(config.review.maxOwnedFiles).map((ref) => ({
+      path: ref.path,
+      role: "owned" as const,
+      reason: "maxOwnedFiles",
+    })),
+    ...feature.contextFiles.slice(config.review.maxContextFiles).map((ref) => ({
+      path: ref.path,
+      role: "context" as const,
+      reason: "maxContextFiles",
+    })),
+  ];
   const fileBlocks: string[] = [];
-  for (const ref of [...owned, ...context]) {
-    fileBlocks.push(await fileBlock(root, ref.path));
+  const includedFiles: ReviewPromptFileManifest[] = [];
+  for (const ref of owned) {
+    const file = await fileBlockWithManifest(root, ref.path, "owned");
+    fileBlocks.push(file.block);
+    includedFiles.push(file.manifest);
   }
-  return `You are reviewing one semantic feature for clawpatch.
+  for (const ref of context) {
+    const file = await fileBlockWithManifest(root, ref.path, "context");
+    fileBlocks.push(file.block);
+    includedFiles.push(file.manifest);
+  }
+  const promptContext = {
+    maxOwnedFiles: config.review.maxOwnedFiles,
+    maxContextFiles: config.review.maxContextFiles,
+    includedFiles: includedFiles.map(({ path, role, bytes, includedBytes, truncated }) => ({
+      path,
+      role,
+      bytes,
+      includedBytes,
+      truncated,
+    })),
+    omittedFiles,
+  };
+  const prompt = `You are reviewing one semantic feature for clawpatch.
 
 Return strict JSON only. No markdown fences.
 
@@ -101,6 +169,9 @@ with multiple evidence refs instead of separate one-off findings.
 
 Avoid speculative low-evidence findings. Evidence must point at included files.
 
+Prompt context:
+${JSON.stringify(promptContext, null, 2)}
+
 JSON shape:
 {
   "findings": [
@@ -123,6 +194,17 @@ JSON shape:
 
 Files:
 ${fileBlocks.join("\n\n")}`;
+  const promptBytes = Buffer.byteLength(prompt, "utf8");
+  return {
+    prompt,
+    manifest: {
+      ...promptContext,
+      includedFiles,
+      omittedFiles,
+      promptBytes,
+      approximateTokens: Math.ceil(prompt.length / 4),
+    },
+  };
 }
 
 function reviewModeInstructions(mode: ReviewMode): string {
@@ -236,19 +318,72 @@ function fixPromptPaths(
 }
 
 async function fileBlock(root: string, path: string): Promise<string> {
+  return (await fileBlockWithManifest(root, path, "context")).block;
+}
+
+async function fileBlockWithManifest(
+  root: string,
+  path: string,
+  role: ReviewPromptFileRole,
+): Promise<{ block: string; manifest: ReviewPromptFileManifest }> {
   const full = resolve(root, path);
   if (!isInside(root, full)) {
-    return `--- ${path}\n[skipped: path escapes repository root]`;
+    return skippedFileBlock(path, role, "path escapes repository root");
   }
   const realRoot = await realpath(root).catch(() => root);
   const realFull = await realpath(full).catch(() => full);
   if (!isInside(realRoot, realFull)) {
-    return `--- ${path}\n[skipped: path escapes repository root]`;
+    return skippedFileBlock(path, role, "path escapes repository root");
   }
-  const contents = await readFile(full, "utf8").catch(() => "[unreadable]");
+  const contents = await readFile(full, "utf8").catch(() => null);
+  if (contents === null) {
+    return {
+      block: `--- ${path}\n[unreadable]`,
+      manifest: {
+        path,
+        role,
+        bytes: 0,
+        includedBytes: 0,
+        truncated: false,
+        readable: false,
+        skippedReason: "unreadable",
+      },
+    };
+  }
+  const bytes = Buffer.byteLength(contents, "utf8");
   const trimmed =
     contents.length > 24_000 ? `${contents.slice(0, 24_000)}\n...[truncated]` : contents;
-  return `--- ${path}\n${trimmed}`;
+  return {
+    block: `--- ${path}\n${trimmed}`,
+    manifest: {
+      path,
+      role,
+      bytes,
+      includedBytes: Buffer.byteLength(trimmed, "utf8"),
+      truncated: trimmed.length !== contents.length,
+      readable: true,
+      skippedReason: null,
+    },
+  };
+}
+
+function skippedFileBlock(
+  path: string,
+  role: ReviewPromptFileRole,
+  reason: string,
+): { block: string; manifest: ReviewPromptFileManifest } {
+  return {
+    block: `--- ${path}\n[skipped: ${reason}]`,
+    manifest: {
+      path,
+      role,
+      bytes: 0,
+      includedBytes: 0,
+      truncated: false,
+      readable: false,
+      skippedReason: reason,
+    },
+  };
 }
 
 function isInside(root: string, candidate: string): boolean {

@@ -387,6 +387,9 @@ describe("workflow", () => {
     const reviewed = await reviewCommand(context, { limit: "1" });
     const paths = statePaths(join(root, ".clawpatch"));
     const finding = (await readFindings(paths))[0];
+    const reviewedFeature = (await readFeatures(paths)).find(
+      (feature) => feature.featureId === finding?.featureId,
+    );
     expect(finding).toBeDefined();
     await writeFinding(paths, {
       ...finding!,
@@ -419,6 +422,7 @@ describe("workflow", () => {
         },
       ],
     });
+    expect(reviewedFeature?.analysisHistory.at(-1)?.summary).toContain("prompt=");
     delete process.env["CLAWPATCH_PROVIDER"];
   });
 

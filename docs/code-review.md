@@ -23,12 +23,15 @@ Current behavior:
 - reviews with a bounded worker pool; default `--jobs` is `10`
 - emits progress to stderr unless `--quiet` is set
 - builds bounded prompt context from owned files, context files, and tests
+- includes a prompt context manifest with included files, omitted files, byte
+  counts, and truncation status
 - calls the configured provider
 - requires strict JSON output
 - rejects findings whose evidence cites files outside the prompt context, stale
   line ranges, or quotes that do not match current file contents
 - writes findings under `.clawpatch/findings/`
 - appends analysis history to the feature record
+- records prompt byte and approximate token counts in feature analysis history
 - releases the feature lock
 
 ## Flags

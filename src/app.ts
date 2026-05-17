@@ -23,8 +23,8 @@ import { mapWithSource } from "./agent-mapper.js";
 import { mapFeatures } from "./mapper.js";
 import { emitProgress } from "./progress.js";
 import { providerByName } from "./provider.js";
-import { buildFixPrompt, buildReviewPrompt, buildRevalidatePrompt } from "./prompt.js";
-import type { ReviewMode } from "./prompt.js";
+import { buildFixPrompt, buildReviewPromptBundle, buildRevalidatePrompt } from "./prompt.js";
+import type { ReviewMode, ReviewPromptManifest } from "./prompt.js";
 import {
   evidenceLabel,
   findingSummaries,
@@ -555,7 +555,7 @@ async function reviewFeature(options: ReviewFeatureOptions): Promise<{ findingId
       },
     );
     locked = lockedFeature;
-    const prompt = await buildReviewPrompt(
+    const reviewPrompt = await buildReviewPromptBundle(
       loaded.root,
       loaded.project,
       lockedFeature,
@@ -566,7 +566,7 @@ async function reviewFeature(options: ReviewFeatureOptions): Promise<{ findingId
       loaded.root,
       lockedFeature,
       config,
-      await provider.review(loaded.root, prompt, providerOptions(config)),
+      await provider.review(loaded.root, reviewPrompt.prompt, providerOptions(config)),
     );
     const modeFindings = reviewFindingsForMode(output.findings, mode);
     const records = modeFindings
@@ -591,7 +591,7 @@ async function reviewFeature(options: ReviewFeatureOptions): Promise<{ findingId
         {
           runId: currentRunId,
           kind: "review",
-          summary: `${records.length} finding(s)`,
+          summary: reviewAnalysisSummary(records.length, reviewPrompt.manifest),
           provider: provider.name,
           model: config.provider.model,
           reasoningEffort: config.provider.reasoningEffort,
@@ -1156,6 +1156,16 @@ function stringField(value: unknown, field: string): string | undefined {
   }
   const candidate = (value as Record<string, unknown>)[field];
   return typeof candidate === "string" ? candidate : undefined;
+}
+
+function reviewAnalysisSummary(findings: number, manifest: ReviewPromptManifest): string {
+  return [
+    `${findings} finding(s)`,
+    `prompt=${manifest.promptBytes} bytes`,
+    `approxTokens=${manifest.approximateTokens}`,
+    `includedFiles=${manifest.includedFiles.length}`,
+    `omittedFiles=${manifest.omittedFiles.length}`,
+  ].join("; ");
 }
 
 function validatePrPatch(patch: PatchAttempt, force: boolean): void {
