@@ -3307,6 +3307,41 @@ describe("mapFeatures", () => {
     ).toBe(false);
   });
 
+  it("detects Android Kotlin roles from Groovy apply plugin map syntax", async () => {
+    const root = await fixtureRoot("clawpatch-kotlin-android-apply-map-role-");
+    await writeFixture(root, "settings.gradle", "pluginManagement {}\n");
+    await writeFixture(root, "build.gradle", 'apply(plugin: "com.android.library")\n');
+    await writeFixture(
+      root,
+      "src/main/kotlin/com/example/ui/MainViewModel.kt",
+      [
+        "package com.example.ui",
+        "",
+        "import androidx.lifecycle.ViewModel",
+        "",
+        "class MainViewModel : ViewModel()",
+        "",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const viewModel = result.features.find((feature) =>
+      feature.title.startsWith("Kotlin Android role view model "),
+    );
+
+    expect(viewModel?.source).toBe("kotlin-android-role-view-model");
+    expect(
+      result.features.some(
+        (feature) =>
+          feature.source === "kotlin-server-role-framework-component" &&
+          feature.ownedFiles.some(
+            (file) => file.path === "src/main/kotlin/com/example/ui/MainViewModel.kt",
+          ),
+      ),
+    ).toBe(false);
+  });
+
   it("does not treat subproject Android apply blocks as root Android modules", async () => {
     const root = await fixtureRoot("clawpatch-kotlin-android-subprojects-apply-");
     await writeFixture(root, "settings.gradle", "pluginManagement {}\n");
@@ -3316,6 +3351,46 @@ describe("mapFeatures", () => {
       [
         "plugins { id 'org.jetbrains.kotlin.jvm' }",
         "subprojects {",
+        "  apply plugin: 'com.android.library'",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "src/main/kotlin/com/example/api/OrderController.kt",
+      [
+        "package com.example.api",
+        "",
+        "import org.springframework.web.bind.annotation.RestController",
+        "",
+        "@RestController",
+        "class OrderController",
+        "",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const web = result.features.find((feature) =>
+      feature.title.startsWith("Kotlin server role web entrypoint "),
+    );
+
+    expect(web?.source).toBe("kotlin-server-role-web-entrypoint");
+    expect(
+      result.features.some((feature) => feature.source.startsWith("kotlin-android-role-")),
+    ).toBe(false);
+  });
+
+  it("does not treat project Android apply blocks as root Android modules", async () => {
+    const root = await fixtureRoot("clawpatch-kotlin-android-project-apply-");
+    await writeFixture(root, "settings.gradle", "pluginManagement {}\n");
+    await writeFixture(
+      root,
+      "build.gradle",
+      [
+        "plugins { id 'org.jetbrains.kotlin.jvm' }",
+        "project(':app') {",
         "  apply plugin: 'com.android.library'",
         "}",
         "",
@@ -4053,7 +4128,8 @@ describe("mapFeatures", () => {
         "",
         "@RestController",
         "class RangeController {",
-        "  fun ids(): IntRange = 1..3",
+        "  fun ids(): ClosedRange<Int> = 1..3",
+        '  fun version(): KotlinVersion = KotlinVersion(1, 9, 0, "stable")',
         "}",
         "",
       ].join("\n"),

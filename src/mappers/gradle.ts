@@ -36,6 +36,8 @@ const kotlinBuiltinTypes = new Set([
   "ByteIterator",
   "Char",
   "CharArray",
+  "CharCategory",
+  "CharDirection",
   "CharIterator",
   "CharProgression",
   "CharRange",
@@ -45,6 +47,8 @@ const kotlinBuiltinTypes = new Set([
   "ClassLoader",
   "ClassNotFoundException",
   "Cloneable",
+  "ClosedFloatingPointRange",
+  "ClosedRange",
   "Collection",
   "Comparable",
   "Comparator",
@@ -80,6 +84,7 @@ const kotlinBuiltinTypes = new Set([
   "InternalError",
   "Iterable",
   "Iterator",
+  "KotlinVersion",
   "Lazy",
   "LazyThreadSafetyMode",
   "LinkedHashMap",
@@ -119,6 +124,7 @@ const kotlinBuiltinTypes = new Set([
   "Number",
   "Object",
   "OutOfMemoryError",
+  "OpenEndRange",
   "Package",
   "Pair",
   "Process",
@@ -1769,7 +1775,7 @@ function hasAppliedAndroidPlugin(buildSource: string, androidAliases: Set<string
 
 function hasDirectAndroidApplyPlugin(source: string): boolean {
   const pattern =
-    /\b(?:apply\s+plugin:\s*["']com\.android\.(?:application|library|dynamic-feature|test)["']|apply\s*\(\s*plugin\s*=\s*["']com\.android\.(?:application|library|dynamic-feature|test)["']\s*\))/gu;
+    /\b(?:apply\s+plugin:\s*["']com\.android\.(?:application|library|dynamic-feature|test)["']|apply\s*\(\s*plugin\s*(?:=|:)\s*["']com\.android\.(?:application|library|dynamic-feature|test)["']\s*\))/gu;
   for (const match of source.matchAll(pattern)) {
     if (!isInsideGradleChildProjectBlock(source, match.index ?? 0)) {
       return true;
@@ -1786,7 +1792,9 @@ function isInsideGradleChildProjectBlock(source: string, offset: number): boolea
       const prefix = source.slice(Math.max(0, index - 100), index).trimEnd();
       const childProjectScope =
         /\b(?:subprojects|allprojects)\s*$/u.test(prefix) ||
-        /\bconfigure\s*\(\s*(?:subprojects|allprojects)\s*\)\s*$/u.test(prefix);
+        /\b(?:subprojects|allprojects)\.configureEach\s*$/u.test(prefix) ||
+        /\bconfigure\s*\(\s*(?:subprojects|allprojects)\s*\)\s*$/u.test(prefix) ||
+        /\bproject\s*\([^)]*\)\s*$/u.test(prefix);
       scopes.push((scopes.at(-1) ?? false) || childProjectScope);
     } else if (char === "}") {
       scopes.pop();
