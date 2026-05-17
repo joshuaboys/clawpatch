@@ -24,6 +24,7 @@ type AgentMapOptions = {
   source: AgentMapMode;
   provider: Provider | null;
   model: string | null;
+  onProgress?: (event: string, fields: Record<string, string | number | boolean>) => void;
 };
 
 type RepoInventorySummary = {
@@ -93,17 +94,37 @@ export async function mapWithSource(
   heuristic: MapResult,
   options: AgentMapOptions,
 ): Promise<AgentMapResult> {
+  const inventoryStarted = Date.now();
+  options.onProgress?.("inventory-start", {});
   const inventory = await repoInventory(root, heuristic.features);
+  options.onProgress?.("inventory-done", {
+    files: inventory.files,
+    sourceFiles: inventory.sourceFiles,
+    ownedSourceFiles: inventory.ownedSourceFiles,
+    weak: inventory.weak,
+    elapsed: `${Math.round((Date.now() - inventoryStarted) / 1000)}s`,
+  });
   if (options.source === "heuristic") {
+    options.onProgress?.("agent-skip", { reason: "heuristic" });
     return withDecision(heuristic, options.source, false, "heuristic mapper selected", inventory);
   }
   if (options.source === "auto" && !inventory.weak) {
+    options.onProgress?.("agent-skip", { reason: "meaningful-heuristic" });
     return withDecision(heuristic, options.source, false, "heuristic map is meaningful", inventory);
   }
   if (options.provider === null) {
     throw new Error("agent mapper provider is required");
   }
+  const agentStarted = Date.now();
+  options.onProgress?.("agent-start", {
+    provider: options.provider.name,
+    model: options.model ?? "default",
+  });
   const agent = await agentMap(root, project, existing, options.provider, options.model, inventory);
+  options.onProgress?.("agent-done", {
+    features: agent.features.length,
+    elapsed: `${Math.round((Date.now() - agentStarted) / 1000)}s`,
+  });
   if (agent.features.length === 0) {
     if (options.source === "agent") {
       throw new ClawpatchError("agent mapper returned no valid features", 8, "malformed-output");

@@ -8,6 +8,7 @@
 - Added `clawpatch map --source auto|agent` to invoke the configured provider as a read-only agent mapper when deterministic mapping is too shallow.
 - Fixed agent mapping so provider-derived slices augment deterministic slices instead of retiring useful heuristic coverage on large repos.
 - Fixed ACPX provider calls so stalled child agents time out instead of hanging indefinitely.
+- Improved `clawpatch map` progress output and Rust mapping latency by reporting mapper activity on stderr and avoiding repeated Rust test discovery walks, thanks @optozorax.
 - Added `--since <ref>` on `clawpatch review` and `clawpatch revalidate` to restrict runs to features whose owned or context files changed since the given git ref, thanks @mvanhorn.
 - Improved Node/TypeScript mapping for large workspaces by splitting package source trees into bounded review groups with package-local tests.
 - Added generic nested SwiftPM, Apple/Xcode, and Gradle/Android app mapping.

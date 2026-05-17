@@ -82,19 +82,49 @@ export async function mapCommand(
   context: AppContext,
   flags: Record<string, string | boolean> = {},
 ): Promise<unknown> {
+  const started = Date.now();
   const loaded = await loadProjectState(context);
   const source = parseMapSource(flags);
   const config = applyProviderFlags(loaded.config, flags);
   const provider = source === "heuristic" ? null : providerByName(config.provider.name);
   const existing = await readFeatures(loaded.paths);
-  const heuristic = await mapFeatures(loaded.root, loaded.project, existing);
+  emitMapProgress(context, "start", {
+    source,
+    existing: existing.length,
+    dryRun: flags["dryRun"] === true,
+  });
+  const heuristic = await mapFeatures(loaded.root, loaded.project, existing, {
+    onProgress: (event) => {
+      emitMapProgress(context, event.event, {
+        mapper: event.mapper,
+        ...(event.seeds === undefined ? {} : { seeds: event.seeds }),
+        ...(event.elapsedMs === undefined
+          ? {}
+          : { elapsed: `${Math.round(event.elapsedMs / 1000)}s` }),
+      });
+    },
+  });
+  emitMapProgress(context, "heuristic-done", {
+    features: heuristic.features.length,
+    new: heuristic.created,
+    changed: heuristic.changed,
+    stale: heuristic.stale,
+  });
   const result = await mapWithSource(loaded.root, loaded.project, existing, heuristic, {
     source,
     provider,
     model: config.provider.model,
+    onProgress: (event, fields) => {
+      emitMapProgress(context, event, fields);
+    },
   });
   const activeFeatureIds = new Set(result.features.map((feature) => feature.featureId));
   if (flags["dryRun"] === true) {
+    emitMapProgress(context, "done", {
+      features: result.features.length,
+      usedAgent: result.decision.usedAgent,
+      elapsed: `${Math.round((Date.now() - started) / 1000)}s`,
+    });
     return {
       dryRun: true,
       features: result.features.length,
@@ -106,6 +136,7 @@ export async function mapCommand(
       reason: result.decision.reason,
     };
   }
+  emitMapProgress(context, "write-start", { features: result.features.length });
   for (const feature of result.features) {
     await writeFeature(loaded.paths, feature);
   }
@@ -119,6 +150,11 @@ export async function mapCommand(
       });
     }
   }
+  emitMapProgress(context, "done", {
+    features: result.features.length,
+    usedAgent: result.decision.usedAgent,
+    elapsed: `${Math.round((Date.now() - started) / 1000)}s`,
+  });
   return {
     features: result.features.length,
     new: result.created,
@@ -1169,6 +1205,20 @@ function reviewJobs(flags: Record<string, string | boolean>): number {
     return 1;
   }
   return Math.min(Math.floor(parsed), 32);
+}
+
+function emitMapProgress(
+  context: AppContext,
+  event: string,
+  fields: Record<string, string | number | boolean>,
+): void {
+  if (context.options.quiet) {
+    return;
+  }
+  const values = Object.entries(fields)
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join(" ");
+  process.stderr.write(`clawpatch map ${event}${values.length > 0 ? ` ${values}` : ""}\n`);
 }
 
 function emitReviewProgress(
