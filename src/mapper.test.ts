@@ -2840,6 +2840,55 @@ describe("mapFeatures", () => {
     ).toBe(false);
   });
 
+  it("does not treat sibling Gradle module Kotlin types as external framework types", async () => {
+    const root = await fixtureRoot("clawpatch-kotlin-sibling-module-type-");
+    await writeFixture(
+      root,
+      "settings.gradle.kts",
+      'pluginManagement {}\ninclude(":core", ":app")\n',
+    );
+    await writeFixture(
+      root,
+      "core/build.gradle.kts",
+      'plugins { id("org.jetbrains.kotlin.jvm") }\n',
+    );
+    await writeFixture(
+      root,
+      "app/build.gradle.kts",
+      'plugins { id("org.jetbrains.kotlin.jvm") }\n',
+    );
+    await writeFixture(
+      root,
+      "core/src/main/kotlin/com/example/core/BaseService.kt",
+      ["package com.example.core", "", "open class BaseService", ""].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "app/src/main/kotlin/com/example/app/AppService.kt",
+      [
+        "package com.example.app",
+        "",
+        "import com.example.core.BaseService",
+        "",
+        "class AppService : BaseService()",
+        "",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+
+    expect(
+      result.features.some(
+        (feature) =>
+          feature.source === "kotlin-server-role-framework-component" &&
+          feature.ownedFiles.some(
+            (file) => file.path === "app/src/main/kotlin/com/example/app/AppService.kt",
+          ),
+      ),
+    ).toBe(false);
+  });
+
   it("does not treat same-package nested Kotlin types as external framework types", async () => {
     const root = await fixtureRoot("clawpatch-kotlin-local-nested-type-");
     await writeFixture(root, "settings.gradle.kts", "pluginManagement {}\n");

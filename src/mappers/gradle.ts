@@ -362,6 +362,7 @@ export async function gradleSeeds(root: string): Promise<FeatureSeed[]> {
 
 async function gradleProjectSeeds(root: string, gradleRoot: string): Promise<FeatureSeed[]> {
   const moduleRoots = await gradleModuleRoots(root, gradleRoot);
+  const projectSourceFiles = await gradleMainSourceFiles(root, moduleRoots);
   const seeds: FeatureSeed[] = [];
   for (const moduleRoot of moduleRoots) {
     const buildFile = await gradleBuildFile(root, moduleRoot);
@@ -420,7 +421,15 @@ async function gradleProjectSeeds(root: string, gradleRoot: string): Promise<Fea
 
     seeds.push(...(await jvmRoleSeeds(root, buildFile, sourceRoot, sourceFiles, testFiles, tags)));
     seeds.push(
-      ...(await kotlinRoleSeeds(root, buildFile, sourceRoot, sourceFiles, testFiles, tags)),
+      ...(await kotlinRoleSeeds(
+        root,
+        buildFile,
+        sourceRoot,
+        sourceFiles,
+        testFiles,
+        tags,
+        projectSourceFiles,
+      )),
     );
 
     if (testFiles.length > 0) {
@@ -449,6 +458,19 @@ async function gradleProjectSeeds(root: string, gradleRoot: string): Promise<Fea
   return seeds;
 }
 
+async function gradleMainSourceFiles(root: string, moduleRoots: string[]): Promise<string[]> {
+  const files = new Set<string>();
+  for (const moduleRoot of moduleRoots) {
+    const sourceRoot = moduleRoot === "." ? "src" : `${moduleRoot}/src`;
+    for (const file of (await walk(root, [sourceRoot]))
+      .filter(isGradleSourceFile)
+      .filter((path) => !isGradleTestFile(moduleRoot, path))) {
+      files.add(file);
+    }
+  }
+  return [...files].toSorted();
+}
+
 async function kotlinRoleSeeds(
   root: string,
   buildFile: string,
@@ -456,6 +478,7 @@ async function kotlinRoleSeeds(
   sourceFiles: string[],
   testFiles: string[],
   tags: string[],
+  projectSourceFiles: string[],
 ): Promise<FeatureSeed[]> {
   const matches = new Map<
     KotlinRoleKey,
@@ -469,8 +492,13 @@ async function kotlinRoleSeeds(
   if (kotlinFiles.length === 0) {
     return [];
   }
-  const projectPackages = await gradleProjectPackages(root, sourceFiles, kotlinFiles);
-  const kotlinPackageTypes = await kotlinPackageDeclarations(root, sourceFiles, kotlinFiles);
+  const projectKotlinFiles = await gradleKotlinFiles(root, projectSourceFiles, kotlinFiles);
+  const projectPackages = await gradleProjectPackages(root, projectSourceFiles, projectKotlinFiles);
+  const kotlinPackageTypes = await kotlinPackageDeclarations(
+    root,
+    projectSourceFiles,
+    projectKotlinFiles,
+  );
 
   for (const { filePath, info } of kotlinFiles) {
     const frameworkEvidence = kotlinFrameworkRoleEvidence(
@@ -537,6 +565,21 @@ async function kotlinRoleSeeds(
     }
   }
   return seeds;
+}
+
+async function gradleKotlinFiles(
+  root: string,
+  sourceFiles: string[],
+  parsedFiles: Array<{ filePath: string; info: KotlinFileInfo }>,
+): Promise<Array<{ filePath: string; info: KotlinFileInfo }>> {
+  const byPath = new Map(parsedFiles.map((file) => [file.filePath, file]));
+  for (const filePath of sourceFiles.filter((file) => file.endsWith(".kt"))) {
+    if (!byPath.has(filePath)) {
+      const source = await readFile(join(root, filePath), "utf8");
+      byPath.set(filePath, { filePath, info: parseKotlinFile(source) });
+    }
+  }
+  return [...byPath.values()];
 }
 
 function kotlinRoleGroups(
