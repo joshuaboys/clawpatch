@@ -385,7 +385,7 @@ async function gradleProjectSeeds(root: string, gradleRoot: string): Promise<Fea
     const testFiles = (await walk(root, [sourceRoot]))
       .filter(isGradleSourceFile)
       .filter((file) => isGradleTestFile(moduleRoot, file));
-    const tags = await gradleTags(root, buildFile, sourceFiles);
+    const tags = await gradleTags(root, gradleRoot, buildFile, sourceFiles);
 
     seeds.push({
       title: `Gradle module ${moduleRoot}`,
@@ -1964,6 +1964,7 @@ function associatedGradleTests(files: string[], testFiles: string[]): SeedTestRe
 
 async function gradleTags(
   root: string,
+  gradleRoot: string,
   buildFile: string,
   sourceFiles: string[],
 ): Promise<string[]> {
@@ -1976,7 +1977,7 @@ async function gradleTags(
   }
   const [buildSource, androidAliases] = await Promise.all([
     readFile(join(root, buildFile), "utf8").catch(() => ""),
-    androidVersionCatalogPluginAliases(root, buildFile),
+    androidVersionCatalogPluginAliases(root, gradleRoot, buildFile),
   ]);
   if (
     sourceFiles.some((file) => file.endsWith("AndroidManifest.xml")) ||
@@ -1990,10 +1991,11 @@ async function gradleTags(
 
 async function androidVersionCatalogPluginAliases(
   root: string,
+  gradleRoot: string,
   buildFile: string,
 ): Promise<Set<string>> {
   const aliases = new Set<string>();
-  for (const path of versionCatalogPaths(buildFile)) {
+  for (const path of versionCatalogPaths(buildFile, gradleRoot)) {
     const source = await readFile(join(root, path), "utf8").catch(() => null);
     if (source === null) {
       continue;
@@ -2005,12 +2007,12 @@ async function androidVersionCatalogPluginAliases(
   return aliases;
 }
 
-function versionCatalogPaths(buildFile: string): string[] {
+function versionCatalogPaths(buildFile: string, gradleRoot: string): string[] {
   const paths = new Set<string>();
   let dir = dirname(buildFile);
   while (true) {
     paths.add(dir === "." ? "gradle/libs.versions.toml" : `${dir}/gradle/libs.versions.toml`);
-    if (dir === ".") {
+    if (dir === gradleRoot) {
       break;
     }
     dir = dirname(dir);

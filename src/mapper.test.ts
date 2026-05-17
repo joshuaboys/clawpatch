@@ -4664,6 +4664,49 @@ describe("mapFeatures", () => {
     ).toBe(false);
   });
 
+  it("does not read parent version-catalog aliases from nested Gradle roots", async () => {
+    const root = await fixtureRoot("clawpatch-kotlin-nested-catalog-shadow-");
+    await writeFixture(
+      root,
+      "gradle/libs.versions.toml",
+      ["[plugins]", 'agp = { id = "com.android.library", version = "8.0.0" }', ""].join("\n"),
+    );
+    await writeFixture(root, "server/settings.gradle.kts", "pluginManagement {}\n");
+    await writeFixture(
+      root,
+      "server/gradle/libs.versions.toml",
+      ["[plugins]", 'agp = { id = "org.jetbrains.kotlin.jvm", version = "1.9" }', ""].join("\n"),
+    );
+    await writeFixture(root, "server/build.gradle.kts", "plugins { alias(libs.plugins.agp) }\n");
+    await writeFixture(
+      root,
+      "server/src/main/kotlin/com/example/api/OrderController.kt",
+      [
+        "package com.example.api",
+        "",
+        "import org.springframework.web.bind.annotation.RestController",
+        "",
+        "@RestController",
+        "class OrderController",
+        "",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const module = result.features.find((feature) => feature.title === "Gradle module server");
+    const web = result.features.find(
+      (feature) =>
+        feature.source === "kotlin-server-role-web-entrypoint" &&
+        feature.ownedFiles.some(
+          (file) => file.path === "server/src/main/kotlin/com/example/api/OrderController.kt",
+        ),
+    );
+
+    expect(module?.tags).not.toContain("android");
+    expect(web?.source).toBe("kotlin-server-role-web-entrypoint");
+  });
+
   it("detects Android Kotlin roles from quoted version-catalog plugin aliases", async () => {
     const root = await fixtureRoot("clawpatch-kotlin-android-plugin-quoted-catalog-");
     await writeFixture(root, "settings.gradle.kts", "pluginManagement {}\n");
