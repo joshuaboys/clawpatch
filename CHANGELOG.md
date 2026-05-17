@@ -1,10 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 - Unreleased
 
 - Improved Kotlin JVM and Android semantic role mapping for Gradle projects, including Android plugin aliases, local type handling, comment/string parsing, and role fallback edges, thanks @mrmans0n.
 
-## 0.1.1 - 2026-05-17
+## 0.2.0 - 2026-05-17
 
 - Added the `acpx` provider for routing review, fix, and revalidate through ACP-compatible coding agents, thanks @mvanhorn.
 - Added an OpenCode CLI provider for review, fix, revalidate, and doctor flows, thanks @Ashwinhegde19.
