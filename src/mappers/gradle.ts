@@ -1757,7 +1757,7 @@ async function gradleTags(
   ]);
   if (
     sourceFiles.some((file) => file.endsWith("AndroidManifest.xml")) ||
-    hasAppliedAndroidPlugin(buildSource, androidAliases)
+    hasAppliedAndroidPlugin(buildSource, androidAliases, buildFile.endsWith(".kts"))
   ) {
     tags.push("android");
   }
@@ -1831,8 +1831,12 @@ function androidPluginAliasForLine(
   return `${pluginTableAlias}.${rawKey}`;
 }
 
-function hasAppliedAndroidPlugin(buildSource: string, androidAliases: Set<string>): boolean {
-  const source = stripJavaComments(buildSource);
+function hasAppliedAndroidPlugin(
+  buildSource: string,
+  androidAliases: Set<string>,
+  isKotlinDsl: boolean,
+): boolean {
+  const source = isKotlinDsl ? stripKotlinComments(buildSource) : stripJavaComments(buildSource);
   const lines = source.split(/\r?\n/u);
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? "";
@@ -1890,20 +1894,19 @@ function hasGradleApplyFalse(lines: string[], index: number, start: number): boo
   const line = lines[index] ?? "";
   const segmentEnd = line.indexOf(";", start);
   const sameLineSegment = line.slice(start, segmentEnd === -1 ? undefined : segmentEnd);
-  if (/\bapply\s+false\b|\.\s*apply\s*\(\s*false\s*\)/u.test(sameLineSegment)) {
-    return true;
-  }
   if (segmentEnd !== -1) {
-    return false;
+    return /\bapply\s+false\b|\.\s*apply\s*\(\s*false\s*\)/u.test(sameLineSegment);
   }
+  const segments = [sameLineSegment];
   for (let next = index + 1; next < lines.length; next += 1) {
     const nextLine = lines[next] ?? "";
     if (isGradlePluginDeclarationLine(nextLine)) {
-      return false;
+      break;
     }
-    if (/\bapply\s+false\b|\.\s*apply\s*\(\s*false\s*\)/u.test(nextLine)) {
-      return true;
-    }
+    segments.push(nextLine);
+  }
+  if (/\bapply\s+false\b|\.\s*apply\s*\(\s*false\s*\)/u.test(segments.join("\n"))) {
+    return true;
   }
   return false;
 }
