@@ -16,6 +16,7 @@ Provider names today:
 - `codex`: shells out to `codex exec` (default)
 - `acpx`: routes through any ACP-compatible coding agent via `acpx`
 - `grok`: shells out to the xAI Grok Build CLI in headless mode (`grok --prompt-file`)
+- `opencode`: shells out to `opencode run --format json`
 - `mock`: deterministic provider for tests and fixtures
 - `mock-fail`: failure provider for tests
 
@@ -35,6 +36,30 @@ Model selection:
 clawpatch review --model <model>
 CLAWPATCH_MODEL=<model> clawpatch review
 ```
+
+## OpenCode
+
+The `opencode` provider shells out to the local [OpenCode CLI](https://opencode.ai/docs/cli/).
+
+- review / revalidate: `opencode run --format json --dir <root> --file <prompt>`
+- fix: adds `--dangerously-skip-permissions`
+- output: parsed from JSONL `text` events
+- read-only operations: set `OPENCODE_PERMISSION` to deny edit, shell, subagent, and web tools
+- model selection: `--model <provider/model>`
+
+Provider selection:
+
+```bash
+clawpatch review --provider opencode --model opencode/big-pickle
+CLAWPATCH_PROVIDER=opencode CLAWPATCH_MODEL=opencode/big-pickle clawpatch review
+clawpatch fix --finding <id> --provider opencode
+```
+
+Permission caveat: OpenCode permissions are configuration-driven. Clawpatch
+sets a restrictive `OPENCODE_PERMISSION` for review and revalidate, and uses
+`--dangerously-skip-permissions` only during explicit `fix`. Review remains
+prompted as read-only, but the same isolated-checkout guidance applies when
+running third-party agents.
 
 ## ACPX
 
@@ -99,4 +124,5 @@ How the Grok provider works:
 
 Direct OpenAI API, local-model, and multi-model panel providers are not
 implemented yet. The `acpx` provider is the generic route for ACP-compatible
-agents; the `grok` provider is a direct integration for the local Grok CLI.
+agents; the `grok` and `opencode` providers are direct integrations for local
+CLIs.

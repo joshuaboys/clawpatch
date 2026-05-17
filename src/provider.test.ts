@@ -3,7 +3,7 @@ import { ClawpatchError } from "./errors.js";
 import { __testing, extractJson, providerByName } from "./provider.js";
 
 // eslint-disable-next-line no-underscore-dangle
-const { acpxFailureMessage, extractAcpxJson, parseAcpxAgent } = __testing;
+const { acpxFailureMessage, extractAcpxJson, extractOpencodeJson, parseAcpxAgent } = __testing;
 
 function updateEnvelope(update: object): string {
   return JSON.stringify({
@@ -242,10 +242,59 @@ describe("acpxFailureMessage", () => {
   });
 });
 
+describe("extractOpencodeJson", () => {
+  it("reconstructs JSON from opencode text events", () => {
+    const stdout = [
+      JSON.stringify({
+        type: "text",
+        part: { text: '{"findings":[],' },
+      }),
+      JSON.stringify({
+        type: "text",
+        part: { text: '"inspected":{"files":[],"symbols":[],"notes":[]}}' },
+      }),
+    ].join("\n");
+
+    expect(extractOpencodeJson(stdout)).toEqual({
+      findings: [],
+      inspected: { files: [], symbols: [], notes: [] },
+    });
+  });
+
+  it("extracts fenced JSON from opencode text events", () => {
+    const stdout = JSON.stringify({
+      type: "text",
+      part: { text: '```json\n{"outcome":"fixed","reasoning":"ok","commands":[]}\n```' },
+    });
+
+    expect(extractOpencodeJson(stdout)).toEqual({
+      outcome: "fixed",
+      reasoning: "ok",
+      commands: [],
+    });
+  });
+
+  it("throws malformed-output with observed event kinds when text is absent", () => {
+    const stdout = JSON.stringify({ type: "step_finish", part: { reason: "stop" } });
+
+    expectMalformed(() => extractOpencodeJson(stdout), /no extractable text.*step_finish/u);
+  });
+
+  it("throws provider-failure for opencode error events", () => {
+    const stdout = JSON.stringify({
+      type: "error",
+      error: { data: { message: "auth required" } },
+    });
+
+    expect(() => extractOpencodeJson(stdout)).toThrow(/auth required/u);
+  });
+});
+
 describe("providerByName", () => {
   it("returns provider instances for optional CLI-backed providers", () => {
     expect(providerByName("acpx").name).toBe("acpx");
     expect(providerByName("grok").name).toBe("grok");
+    expect(providerByName("opencode").name).toBe("opencode");
   });
 
   it("still supports codex, mock, and mock-fail", () => {

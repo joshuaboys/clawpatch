@@ -16,6 +16,7 @@
 - Added Laravel/PHP feature mapping for routes, controllers, form requests, Artisan commands, jobs, services, models, migrations, seeders, Composer scripts, and PHP tests, thanks @Jonathanm10.
 - Added Kotlin semantic role mapping for Gradle projects, including Android UI, ViewModel, data, external client, dependency injection, and server-side role slices, thanks @mrmans0n.
 - Added a Grok CLI provider for review, fix, revalidate, and doctor flows, thanks @ebastos.
+- Added an OpenCode CLI provider for review, fix, revalidate, and doctor flows, thanks @Ashwinhegde19.
 - Added `--since <ref>` on `clawpatch review` and `clawpatch revalidate` to restrict runs to features whose owned or context files changed since the given git ref, thanks @mvanhorn.
 - Added Flask route feature mapping for Python projects, including `web/` source roots, common root entry files, non-list method literals, and Python framework detection.
 - Added the `acpx` provider for routing review, fix, and revalidate through ACP-compatible coding agents, thanks @mvanhorn.
