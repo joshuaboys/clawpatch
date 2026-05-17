@@ -116,7 +116,13 @@ export async function mapWithSource(
       inventory,
     );
   }
-  return withDecision(agent, options.source, true, inventory.weakReason, inventory);
+  return withDecision(
+    mergeMapResults(heuristic, agent, existing),
+    options.source,
+    true,
+    inventory.weakReason,
+    inventory,
+  );
 }
 
 function withDecision(
@@ -229,6 +235,42 @@ function agentIdentityKey(entrypoint: string, ownedFiles: SeedFileRef[]): string
   return uniqueStrings([entrypoint, ...ownedFiles.map((file) => file.path)])
     .toSorted()
     .join("|");
+}
+
+function mergeMapResults(
+  heuristic: MapResult,
+  agent: MapResult,
+  existing: FeatureRecord[],
+): MapResult {
+  const byId = new Map<string, FeatureRecord>();
+  for (const feature of heuristic.features) {
+    byId.set(feature.featureId, feature);
+  }
+  for (const feature of agent.features) {
+    byId.set(feature.featureId, feature);
+  }
+  const features = [...byId.values()];
+  const existingById = new Map(existing.map((feature) => [feature.featureId, feature]));
+  return {
+    features,
+    created: features.filter((feature) => !existingById.has(feature.featureId)).length,
+    changed: features.filter((feature) => {
+      const previous = existingById.get(feature.featureId);
+      return previous !== undefined && stableFeatureJson(previous) !== stableFeatureJson(feature);
+    }).length,
+    stale: existing.filter((feature) => !byId.has(feature.featureId)).length,
+  };
+}
+
+function stableFeatureJson(feature: FeatureRecord): string {
+  const {
+    createdAt: _createdAt,
+    updatedAt: _updatedAt,
+    lock: _lock,
+    analysisHistory: _analysisHistory,
+    ...stable
+  } = feature;
+  return JSON.stringify(stable);
 }
 
 async function validFileRefs(

@@ -100,6 +100,7 @@ const opencodeProvider: Provider = {
 };
 
 const ACPX_TESTED_VERSIONS = "^0.8.0";
+const ACPX_DEFAULT_TIMEOUT_MS = 180_000;
 
 const acpxProvider: Provider = {
   name: "acpx",
@@ -484,7 +485,7 @@ async function runAcpxJson(
     args,
     root,
     buildAcpxPrompt(prompt, schema, permission),
-    { trimOutput: false },
+    { trimOutput: false, timeoutMs: acpxTimeoutMs() },
   );
   if (result.exitCode !== 0) {
     throw new ClawpatchError(
@@ -842,10 +843,20 @@ function acpxExitCode(stdout: string, stderr: string, exitCode: number | null): 
   if (/acpx: command not found|spawn acpx ENOENT/iu.test(combined)) {
     return 4;
   }
-  if (exitCode === 3 || /TIMEOUT/iu.test(combined)) {
+  if (exitCode === 3 || exitCode === 124 || /TIMEOUT|timed out/iu.test(combined)) {
     return 1;
   }
   return 1;
+}
+
+function acpxTimeoutMs(): number {
+  const raw =
+    process.env["CLAWPATCH_ACPX_TIMEOUT_MS"] ?? process.env["CLAWPATCH_PROVIDER_TIMEOUT_MS"];
+  if (raw === undefined) {
+    return ACPX_DEFAULT_TIMEOUT_MS;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : ACPX_DEFAULT_TIMEOUT_MS;
 }
 
 // eslint-disable-next-line no-underscore-dangle

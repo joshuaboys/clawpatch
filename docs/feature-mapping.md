@@ -66,11 +66,12 @@ the configured provider to split the repository into reviewable feature slices.
 `--source auto` runs the deterministic mapper first and invokes the agent mapper
 only when the result is weak, such as no features, only config features, very low
 source coverage, or one/two features for a larger source tree. `--source agent`
-forces the provider-backed mapper. The agent mapper is read-only, receives a
-bounded repository inventory rather than the whole repo, and Clawpatch validates
-that every returned path exists inside the repository before writing features.
-Agent-derived features use `source: agent-mapper` and include the mapper reason in
-the feature summary.
+forces the provider-backed mapper and adds its slices to the deterministic map
+instead of retiring deterministic coverage. The agent mapper is read-only,
+receives a bounded repository inventory rather than the whole repo, and Clawpatch
+validates that every returned path exists inside the repository before writing
+features. Agent-derived features use `source: agent-mapper` and include the
+mapper reason in the feature summary.
 
 For large Node/TypeScript repositories, source groups are recursively split by
 directory and then chunked so one feature owns at most a small bounded set of

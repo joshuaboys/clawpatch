@@ -6,6 +6,8 @@
 - Added an OpenCode CLI provider for review, fix, revalidate, and doctor flows, thanks @Ashwinhegde19.
 - Added a Grok CLI provider for review, fix, revalidate, and doctor flows, thanks @ebastos.
 - Added `clawpatch map --source auto|agent` to invoke the configured provider as a read-only agent mapper when deterministic mapping is too shallow.
+- Fixed agent mapping so provider-derived slices augment deterministic slices instead of retiring useful heuristic coverage on large repos.
+- Fixed ACPX provider calls so stalled child agents time out instead of hanging indefinitely.
 - Added `--since <ref>` on `clawpatch review` and `clawpatch revalidate` to restrict runs to features whose owned or context files changed since the given git ref, thanks @mvanhorn.
 - Improved Node/TypeScript mapping for large workspaces by splitting package source trees into bounded review groups with package-local tests.
 - Added generic nested SwiftPM, Apple/Xcode, and Gradle/Android app mapping.

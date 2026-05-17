@@ -1132,6 +1132,29 @@ describe("workflow", () => {
     expect(second.stale).toBe(0);
   });
 
+  it("augments deterministic features when forced agent mapping returns partial coverage", async () => {
+    const root = await fixtureRoot("clawpatch-agent-map-merge-");
+    await writeFixture(
+      root,
+      "package.json",
+      JSON.stringify({ name: "merge-cli", bin: { merge: "src/index.ts" } }),
+    );
+    await writeFixture(root, "src/index.ts", "export const value = 1;\n");
+    await writeFixture(root, "agent/worker.custom", "worker source\n");
+    await writeFixture(root, "agent/scheduler.custom", "scheduler source\n");
+    const context = await makeContext(testOptions(root));
+
+    await initCommand(context, {});
+    await mapCommand(context);
+    const mapped = await mapCommand(context, { source: "agent", provider: "mock" });
+    const features = await readFeatures(statePaths(join(root, ".clawpatch")));
+
+    expect(mapped).toMatchObject({ source: "agent", usedAgent: true, stale: 0 });
+    expect(features.some((feature) => feature.source === "package-json-bin")).toBe(true);
+    expect(features.some((feature) => feature.source === "agent-mapper")).toBe(true);
+    expect(features.some((feature) => feature.status === "skipped")).toBe(false);
+  });
+
   it("rejects invalid map source values", async () => {
     const root = await fixtureRoot("clawpatch-agent-map-bad-source-");
     const context = await makeContext(testOptions(root));
