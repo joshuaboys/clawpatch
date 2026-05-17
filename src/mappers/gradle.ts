@@ -1507,39 +1507,91 @@ async function gradleTags(
   ) {
     tags.push("kotlin");
   }
-  const buildSource = await readFile(join(root, buildFile), "utf8").catch(() => "");
+  const [buildSource, androidAliases] = await Promise.all([
+    readFile(join(root, buildFile), "utf8").catch(() => ""),
+    androidVersionCatalogPluginAliases(root, buildFile),
+  ]);
   if (
     sourceFiles.some((file) => file.endsWith("AndroidManifest.xml")) ||
-    hasAppliedAndroidPlugin(buildSource)
+    hasAppliedAndroidPlugin(buildSource, androidAliases)
   ) {
     tags.push("android");
   }
   return tags;
 }
 
-function hasAppliedAndroidPlugin(buildSource: string): boolean {
+async function androidVersionCatalogPluginAliases(
+  root: string,
+  buildFile: string,
+): Promise<Set<string>> {
+  const aliases = new Set<string>();
+  for (const path of versionCatalogPaths(buildFile)) {
+    const source = await readFile(join(root, path), "utf8").catch(() => null);
+    if (source === null) {
+      continue;
+    }
+    for (const alias of parseAndroidPluginAliases(source)) {
+      aliases.add(alias);
+    }
+  }
+  return aliases;
+}
+
+function versionCatalogPaths(buildFile: string): string[] {
+  const paths = new Set<string>();
+  let dir = dirname(buildFile);
+  while (true) {
+    paths.add(dir === "." ? "gradle/libs.versions.toml" : `${dir}/gradle/libs.versions.toml`);
+    if (dir === ".") {
+      break;
+    }
+    dir = dirname(dir);
+  }
+  return [...paths];
+}
+
+function parseAndroidPluginAliases(source: string): Set<string> {
+  const aliases = new Set<string>();
+  let inPlugins = false;
+  for (const rawLine of source.split(/\r?\n/u)) {
+    const line = rawLine.replace(/#.*/u, "").trim();
+    if (line.length === 0) {
+      continue;
+    }
+    const section = /^\[([^\]]+)\]$/u.exec(line)?.[1];
+    if (section !== undefined) {
+      inPlugins = section === "plugins";
+      continue;
+    }
+    if (!inPlugins || !/com\.android\.(?:application|library|dynamic-feature|test)/u.test(line)) {
+      continue;
+    }
+    const alias = /^([A-Za-z0-9_.-]+)\s*=/u.exec(line)?.[1];
+    if (alias !== undefined) {
+      aliases.add(normalizeVersionCatalogAlias(alias));
+    }
+  }
+  return aliases;
+}
+
+function hasAppliedAndroidPlugin(buildSource: string, androidAliases: Set<string>): boolean {
   const source = stripJavaComments(buildSource);
   const lines = source.split(/\r?\n/u);
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? "";
     for (const match of line.matchAll(androidPluginDeclarationPattern())) {
       const start = match.index ?? 0;
-      const segmentEnd = line.indexOf(";", start);
-      const sameLineSegment = line.slice(start, segmentEnd === -1 ? undefined : segmentEnd);
-      let applyFalse = /\bapply\s+false\b|\.\s*apply\s*\(\s*false\s*\)/u.test(sameLineSegment);
-      if (segmentEnd === -1) {
-        for (let next = index + 1; next < lines.length; next += 1) {
-          const nextLine = lines[next] ?? "";
-          if (isGradlePluginDeclarationLine(nextLine)) {
-            break;
-          }
-          if (/\bapply\s+false\b|\.\s*apply\s*\(\s*false\s*\)/u.test(nextLine)) {
-            applyFalse = true;
-            break;
-          }
-        }
+      if (!hasGradleApplyFalse(lines, index, start)) {
+        return true;
       }
-      if (!applyFalse) {
+    }
+    for (const match of line.matchAll(/\balias\s*\(\s*libs\.plugins\.([A-Za-z0-9_.]+)\s*\)/gu)) {
+      const alias = match[1];
+      if (
+        alias !== undefined &&
+        androidAliases.has(normalizeVersionCatalogAlias(alias)) &&
+        !hasGradleApplyFalse(lines, index, match.index ?? 0)
+      ) {
         return true;
       }
     }
@@ -1554,8 +1606,34 @@ function hasAppliedAndroidPlugin(buildSource: string): boolean {
   );
 }
 
+function hasGradleApplyFalse(lines: string[], index: number, start: number): boolean {
+  const line = lines[index] ?? "";
+  const segmentEnd = line.indexOf(";", start);
+  const sameLineSegment = line.slice(start, segmentEnd === -1 ? undefined : segmentEnd);
+  if (/\bapply\s+false\b|\.\s*apply\s*\(\s*false\s*\)/u.test(sameLineSegment)) {
+    return true;
+  }
+  if (segmentEnd !== -1) {
+    return false;
+  }
+  for (let next = index + 1; next < lines.length; next += 1) {
+    const nextLine = lines[next] ?? "";
+    if (isGradlePluginDeclarationLine(nextLine)) {
+      return false;
+    }
+    if (/\bapply\s+false\b|\.\s*apply\s*\(\s*false\s*\)/u.test(nextLine)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function androidPluginDeclarationPattern(): RegExp {
   return /\b(?:id\s*\(?\s*["']com\.android\.(?:application|library|dynamic-feature|test)["']\s*\)?|alias\s*\(\s*libs\.plugins\.[A-Za-z0-9_.]*(?:android\.(?:application|library|dynamicFeature|dynamic-feature|test)|android(?:Application|Library|DynamicFeature|Test)|comAndroid(?:Application|Library|DynamicFeature|Test))[A-Za-z0-9_.]*\s*\))/gu;
+}
+
+function normalizeVersionCatalogAlias(alias: string): string {
+  return alias.replace(/[-_]/gu, ".").toLowerCase();
 }
 
 function isGradlePluginDeclarationLine(line: string): boolean {
