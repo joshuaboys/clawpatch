@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { z } from "zod";
 import { runCommandArgs } from "./exec.js";
 import { ClawpatchError } from "./errors.js";
 import {
@@ -306,32 +307,36 @@ async function runCodexJson(
   const schemaPath = join(dir, "schema.json");
   const outputPath = join(dir, "output.json");
   await writeFile(schemaPath, JSON.stringify(schema), "utf8");
-  const args = [
-    "exec",
-    "--cd",
-    root,
-    "--sandbox",
-    sandbox,
-    "--output-schema",
-    schemaPath,
-    "--output-last-message",
-    outputPath,
-  ];
-  addCodexModelArgs(args, options);
-  args.push("-");
-  const result = await runCommandArgs("codex", args, root, prompt);
-  if (result.exitCode !== 0) {
-    throw new ClawpatchError(
-      `codex provider failed: ${result.stderr || result.stdout}`,
-      providerExitCode(result.stderr),
-      "provider-failure",
-    );
+  try {
+    const args = [
+      "exec",
+      "--cd",
+      root,
+      "--sandbox",
+      sandbox,
+      "--output-schema",
+      schemaPath,
+      "--output-last-message",
+      outputPath,
+    ];
+    addCodexModelArgs(args, options);
+    args.push("-");
+    const result = await runCommandArgs("codex", args, root, prompt);
+    if (result.exitCode !== 0) {
+      throw new ClawpatchError(
+        `codex provider failed: ${result.stderr || result.stdout}`,
+        providerExitCode(result.stderr),
+        "provider-failure",
+      );
+    }
+    const raw = await readFile(outputPath, "utf8").catch(() => "");
+    if (raw.trim().length === 0) {
+      throw new ClawpatchError("codex provider produced no JSON output", 8, "malformed-output");
+    }
+    return parseCodexJson(raw);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
-  const raw = await readFile(outputPath, "utf8").catch(() => "");
-  if (raw.trim().length === 0) {
-    throw new ClawpatchError("codex provider produced no JSON output", 8, "malformed-output");
-  }
-  return parseCodexJson(raw);
 }
 
 function addCodexModelArgs(args: string[], options: ProviderOptions): void {
@@ -896,212 +901,40 @@ export const __testing = {
   extractOpencodeJson,
   parseAcpxAgent,
   parseCodexJson,
+  providerJsonSchema,
 };
 
-const agentMapJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["features", "notes"],
-  properties: {
-    features: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: [
-          "title",
-          "summary",
-          "kind",
-          "confidence",
-          "entrypoints",
-          "ownedFiles",
-          "contextFiles",
-          "tests",
-          "tags",
-          "trustBoundaries",
-          "reason",
-        ],
-        properties: {
-          title: { type: "string" },
-          summary: { type: "string" },
-          kind: {
-            enum: [
-              "cli-command",
-              "route",
-              "ui-flow",
-              "service",
-              "job",
-              "agent-tool",
-              "library",
-              "config",
-              "release",
-              "test-suite",
-              "infra",
-              "unknown",
-            ],
-          },
-          confidence: { enum: ["high", "medium", "low"] },
-          entrypoints: { type: "array", items: { $ref: "#/$defs/entrypoint" } },
-          ownedFiles: { type: "array", items: { $ref: "#/$defs/fileRef" } },
-          contextFiles: { type: "array", items: { $ref: "#/$defs/fileRef" } },
-          tests: { type: "array", items: { $ref: "#/$defs/testRef" } },
-          tags: { type: "array", items: { type: "string" } },
-          trustBoundaries: {
-            type: "array",
-            items: {
-              enum: [
-                "user-input",
-                "network",
-                "filesystem",
-                "secrets",
-                "process-exec",
-                "database",
-                "auth",
-                "permissions",
-                "concurrency",
-                "external-api",
-                "serialization",
-              ],
-            },
-          },
-          reason: { type: "string" },
-        },
-      },
-    },
-    notes: { type: "array", items: { type: "string" } },
-  },
-  $defs: {
-    fileRef: {
-      type: "object",
-      additionalProperties: false,
-      required: ["path", "reason"],
-      properties: {
-        path: { type: "string" },
-        reason: { type: "string" },
-      },
-    },
-    testRef: {
-      type: "object",
-      additionalProperties: false,
-      required: ["path", "command"],
-      properties: {
-        path: { type: "string" },
-        command: { anyOf: [{ type: "string" }, { type: "null" }] },
-      },
-    },
-    entrypoint: {
-      type: "object",
-      additionalProperties: false,
-      required: ["path", "symbol", "route", "command"],
-      properties: {
-        path: { type: "string" },
-        symbol: { anyOf: [{ type: "string" }, { type: "null" }] },
-        route: { anyOf: [{ type: "string" }, { type: "null" }] },
-        command: { anyOf: [{ type: "string" }, { type: "null" }] },
-      },
-    },
-  },
-};
+const providerUnsupportedJsonSchemaKeywords = new Set([
+  "$schema",
+  "exclusiveMaximum",
+  "exclusiveMinimum",
+  "maximum",
+  "minimum",
+  "multipleOf",
+]);
 
-const reviewJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["findings", "inspected"],
-  properties: {
-    findings: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: [
-          "title",
-          "category",
-          "severity",
-          "confidence",
-          "evidence",
-          "reasoning",
-          "reproduction",
-          "recommendation",
-          "whyTestsDoNotAlreadyCoverThis",
-          "suggestedRegressionTest",
-          "minimumFixScope",
-        ],
-        properties: {
-          title: { type: "string" },
-          category: {
-            enum: [
-              "bug",
-              "security",
-              "performance",
-              "concurrency",
-              "api-contract",
-              "data-loss",
-              "test-gap",
-              "docs-gap",
-              "build-release",
-              "maintainability",
-            ],
-          },
-          severity: { enum: ["critical", "high", "medium", "low"] },
-          confidence: { enum: ["high", "medium", "low"] },
-          evidence: { type: "array", items: { $ref: "#/$defs/evidence" } },
-          reasoning: { type: "string" },
-          reproduction: { anyOf: [{ type: "string" }, { type: "null" }] },
-          recommendation: { type: "string" },
-          whyTestsDoNotAlreadyCoverThis: { type: "string" },
-          suggestedRegressionTest: { anyOf: [{ type: "string" }, { type: "null" }] },
-          minimumFixScope: { type: "string" },
-        },
-      },
-    },
-    inspected: {
-      type: "object",
-      additionalProperties: false,
-      required: ["files", "symbols", "notes"],
-      properties: {
-        files: { type: "array", items: { type: "string" } },
-        symbols: { type: "array", items: { type: "string" } },
-        notes: { type: "array", items: { type: "string" } },
-      },
-    },
-  },
-  $defs: {
-    evidence: {
-      type: "object",
-      additionalProperties: false,
-      required: ["path", "startLine", "endLine", "symbol", "quote"],
-      properties: {
-        path: { type: "string" },
-        startLine: { anyOf: [{ type: "integer" }, { type: "null" }] },
-        endLine: { anyOf: [{ type: "integer" }, { type: "null" }] },
-        symbol: { anyOf: [{ type: "string" }, { type: "null" }] },
-        quote: { anyOf: [{ type: "string" }, { type: "null" }] },
-      },
-    },
-  },
-};
+const agentMapJsonSchema = providerJsonSchema(agentMapOutputSchema);
+const reviewJsonSchema = providerJsonSchema(reviewOutputSchema);
+const revalidateJsonSchema = providerJsonSchema(revalidateOutputSchema);
+const fixPlanJsonSchema = providerJsonSchema(fixPlanOutputSchema);
 
-const revalidateJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["outcome", "reasoning", "commands"],
-  properties: {
-    outcome: { enum: ["fixed", "open", "false-positive", "uncertain"] },
-    reasoning: { type: "string" },
-    commands: { type: "array", items: { type: "string" } },
-  },
-};
+function providerJsonSchema(schema: z.ZodType): object {
+  return stripProviderUnsupportedSchemaKeywords(z.toJSONSchema(schema)) as object;
+}
 
-const fixPlanJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["summary", "findingIds", "plannedFiles", "risk", "steps", "validationCommands"],
-  properties: {
-    summary: { type: "string" },
-    findingIds: { type: "array", items: { type: "string" } },
-    plannedFiles: { type: "array", items: { type: "string" } },
-    risk: { enum: ["low", "medium", "high"] },
-    steps: { type: "array", items: { type: "string" } },
-    validationCommands: { type: "array", items: { type: "string" } },
-  },
-};
+function stripProviderUnsupportedSchemaKeywords(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(stripProviderUnsupportedSchemaKeywords);
+  }
+  if (typeof value !== "object" || value === null) {
+    return value;
+  }
+  const output: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (providerUnsupportedJsonSchemaKeywords.has(key)) {
+      continue;
+    }
+    output[key] = stripProviderUnsupportedSchemaKeywords(item);
+  }
+  return output;
+}

@@ -1,11 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { ClawpatchError } from "./errors.js";
 import { __testing, extractJson, providerByName } from "./provider.js";
+import { reviewOutputSchema } from "./types.js";
 
 // eslint-disable-next-line no-underscore-dangle
-const { acpxFailureMessage, extractAcpxJson, extractOpencodeJson, parseAcpxAgent, parseCodexJson } =
-  __testing;
-const { addCodexModelArgs } = __testing;
+const {
+  addCodexModelArgs,
+  acpxFailureMessage,
+  extractAcpxJson,
+  extractOpencodeJson,
+  parseAcpxAgent,
+  parseCodexJson,
+  providerJsonSchema,
+} = __testing;
 
 function updateEnvelope(update: object): string {
   return JSON.stringify({
@@ -113,6 +120,33 @@ describe("Codex provider args", () => {
     expect(args).toEqual(["exec"]);
   });
 });
+
+describe("providerJsonSchema", () => {
+  it("strips numeric constraints that Codex strict schemas reject", () => {
+    const schema = providerJsonSchema(reviewOutputSchema);
+
+    expect(schemaKeys(schema)).not.toEqual(
+      expect.arrayContaining([
+        "$schema",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "minimum",
+        "maximum",
+        "multipleOf",
+      ]),
+    );
+  });
+});
+
+function schemaKeys(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap(schemaKeys);
+  }
+  if (typeof value !== "object" || value === null) {
+    return [];
+  }
+  return Object.entries(value).flatMap(([key, item]) => [key, ...schemaKeys(item)]);
+}
 
 describe("parseAcpxAgent", () => {
   it("defaults null model to codex/null", () => {
