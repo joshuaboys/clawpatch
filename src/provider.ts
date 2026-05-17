@@ -735,6 +735,25 @@ export function parseAcpxAgent(model: string | null): {
   return { agent: model.slice(0, idx), agentModel: model.slice(idx + 1) };
 }
 
+function buildAcpxJsonArgs(
+  root: string,
+  model: string | null,
+  permission: "read" | "approve",
+): string[] {
+  const { agent, agentModel } = parseAcpxAgent(model);
+  const permFlag = permission === "read" ? "--approve-reads" : "--approve-all";
+  const args = ["--cwd", root, permFlag, "--format", "json", "--json-strict", "--suppress-reads"];
+  const promptRetries = acpxPromptRetries();
+  if (promptRetries > 0) {
+    args.push("--prompt-retries", String(promptRetries));
+  }
+  if (agentModel !== null) {
+    args.push("--model", agentModel);
+  }
+  args.push(agent, "exec", "--file", "-");
+  return args;
+}
+
 async function runAcpxJson(
   root: string,
   prompt: string,
@@ -742,13 +761,7 @@ async function runAcpxJson(
   schema: object,
   permission: "read" | "approve",
 ): Promise<unknown> {
-  const { agent, agentModel } = parseAcpxAgent(model);
-  const permFlag = permission === "read" ? "--approve-reads" : "--approve-all";
-  const args = ["--cwd", root, permFlag, "--format", "json", "--json-strict", "--suppress-reads"];
-  if (agentModel !== null) {
-    args.push("--model", agentModel);
-  }
-  args.push(agent, "exec", "--file", "-");
+  const args = buildAcpxJsonArgs(root, model, permission);
   const result = await runCommandArgs(
     "acpx",
     args,
@@ -1062,11 +1075,22 @@ function acpxTimeoutMs(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : ACPX_DEFAULT_TIMEOUT_MS;
 }
 
+function acpxPromptRetries(): number {
+  const raw = process.env["CLAWPATCH_ACPX_PROMPT_RETRIES"];
+  if (raw === undefined) {
+    return 1;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 1;
+}
+
 // eslint-disable-next-line no-underscore-dangle
 export const __testing = {
   acpxFailureMessage,
+  acpxPromptRetries,
   addCodexModelArgs,
   addCodexSandboxArgs,
+  buildAcpxJsonArgs,
   codexFailureMessage,
   extractAcpxJson,
   extractOpencodeJson,

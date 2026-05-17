@@ -6,9 +6,11 @@ import { revalidateOutputSchema, reviewOutputSchema } from "./types.js";
 
 // eslint-disable-next-line no-underscore-dangle
 const {
-  addCodexSandboxArgs,
-  addCodexModelArgs,
   acpxFailureMessage,
+  acpxPromptRetries,
+  addCodexModelArgs,
+  addCodexSandboxArgs,
+  buildAcpxJsonArgs,
   codexFailureMessage,
   extractAcpxJson,
   extractOpencodeJson,
@@ -17,6 +19,24 @@ const {
   piThinkingLevel,
   providerJsonSchema,
 } = __testing;
+
+function withEnv(name: string, value: string | undefined, fn: () => void): void {
+  const previous = process.env[name];
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+  try {
+    fn();
+  } finally {
+    if (previous === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = previous;
+    }
+  }
+}
 
 function updateEnvelope(update: object): string {
   return JSON.stringify({
@@ -567,5 +587,92 @@ describe("providerByName", () => {
     expect(providerByName("codex").name).toBe("codex");
     expect(providerByName("mock").name).toBe("mock");
     expect(providerByName("mock-fail").name).toBe("mock-fail");
+  });
+});
+
+describe("acpxPromptRetries", () => {
+  afterEach(() => {
+    delete process.env["CLAWPATCH_ACPX_PROMPT_RETRIES"];
+  });
+
+  it("defaults to 1 when env var is unset", () => {
+    delete process.env["CLAWPATCH_ACPX_PROMPT_RETRIES"];
+    expect(acpxPromptRetries()).toBe(1);
+  });
+
+  it("respects a numeric env override", () => {
+    withEnv("CLAWPATCH_ACPX_PROMPT_RETRIES", "3", () => {
+      expect(acpxPromptRetries()).toBe(3);
+    });
+  });
+
+  it("treats 0 as a valid override (disables retries)", () => {
+    withEnv("CLAWPATCH_ACPX_PROMPT_RETRIES", "0", () => {
+      expect(acpxPromptRetries()).toBe(0);
+    });
+  });
+
+  it("falls back to 1 on invalid input", () => {
+    withEnv("CLAWPATCH_ACPX_PROMPT_RETRIES", "not-a-number", () => {
+      expect(acpxPromptRetries()).toBe(1);
+    });
+  });
+
+  it("falls back to 1 on negative input", () => {
+    withEnv("CLAWPATCH_ACPX_PROMPT_RETRIES", "-2", () => {
+      expect(acpxPromptRetries()).toBe(1);
+    });
+  });
+});
+
+describe("buildAcpxJsonArgs", () => {
+  afterEach(() => {
+    delete process.env["CLAWPATCH_ACPX_PROMPT_RETRIES"];
+  });
+
+  it("includes --prompt-retries 1 by default", () => {
+    delete process.env["CLAWPATCH_ACPX_PROMPT_RETRIES"];
+    const args = buildAcpxJsonArgs("/tmp/repo", null, "read");
+    expect(args).toEqual([
+      "--cwd",
+      "/tmp/repo",
+      "--approve-reads",
+      "--format",
+      "json",
+      "--json-strict",
+      "--suppress-reads",
+      "--prompt-retries",
+      "1",
+      "codex",
+      "exec",
+      "--file",
+      "-",
+    ]);
+  });
+
+  it("honors CLAWPATCH_ACPX_PROMPT_RETRIES env override", () => {
+    withEnv("CLAWPATCH_ACPX_PROMPT_RETRIES", "4", () => {
+      const args = buildAcpxJsonArgs("/tmp/repo", null, "approve");
+      const idx = args.indexOf("--prompt-retries");
+      expect(idx).toBeGreaterThanOrEqual(0);
+      expect(args[idx + 1]).toBe("4");
+      expect(args).toContain("--approve-all");
+    });
+  });
+
+  it("omits --prompt-retries when CLAWPATCH_ACPX_PROMPT_RETRIES=0", () => {
+    withEnv("CLAWPATCH_ACPX_PROMPT_RETRIES", "0", () => {
+      const args = buildAcpxJsonArgs("/tmp/repo", null, "read");
+      expect(args).not.toContain("--prompt-retries");
+    });
+  });
+
+  it("passes through agent and model from parseAcpxAgent", () => {
+    delete process.env["CLAWPATCH_ACPX_PROMPT_RETRIES"];
+    const args = buildAcpxJsonArgs("/tmp/repo", "gamma:opus", "read");
+    const modelIdx = args.indexOf("--model");
+    expect(modelIdx).toBeGreaterThanOrEqual(0);
+    expect(args[modelIdx + 1]).toBe("opus");
+    expect(args).toContain("gamma");
   });
 });
