@@ -1764,14 +1764,35 @@ function hasAppliedAndroidPlugin(buildSource: string, androidAliases: Set<string
       }
     }
   }
-  return (
-    /\bapply\s+plugin:\s*["']com\.android\.(?:application|library|dynamic-feature|test)["']/u.test(
-      source,
-    ) ||
-    /\bapply\s*\(\s*plugin\s*=\s*["']com\.android\.(?:application|library|dynamic-feature|test)["']\s*\)/u.test(
-      source,
-    )
-  );
+  return hasDirectAndroidApplyPlugin(source);
+}
+
+function hasDirectAndroidApplyPlugin(source: string): boolean {
+  const pattern =
+    /\b(?:apply\s+plugin:\s*["']com\.android\.(?:application|library|dynamic-feature|test)["']|apply\s*\(\s*plugin\s*=\s*["']com\.android\.(?:application|library|dynamic-feature|test)["']\s*\))/gu;
+  for (const match of source.matchAll(pattern)) {
+    if (!isInsideGradleChildProjectBlock(source, match.index ?? 0)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isInsideGradleChildProjectBlock(source: string, offset: number): boolean {
+  const scopes: boolean[] = [];
+  for (let index = 0; index < offset; index += 1) {
+    const char = source[index];
+    if (char === "{") {
+      const prefix = source.slice(Math.max(0, index - 100), index).trimEnd();
+      const childProjectScope =
+        /\b(?:subprojects|allprojects)\s*$/u.test(prefix) ||
+        /\bconfigure\s*\(\s*(?:subprojects|allprojects)\s*\)\s*$/u.test(prefix);
+      scopes.push((scopes.at(-1) ?? false) || childProjectScope);
+    } else if (char === "}") {
+      scopes.pop();
+    }
+  }
+  return scopes.includes(true);
 }
 
 function hasGradleApplyFalse(lines: string[], index: number, start: number): boolean {

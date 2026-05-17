@@ -3307,6 +3307,46 @@ describe("mapFeatures", () => {
     ).toBe(false);
   });
 
+  it("does not treat subproject Android apply blocks as root Android modules", async () => {
+    const root = await fixtureRoot("clawpatch-kotlin-android-subprojects-apply-");
+    await writeFixture(root, "settings.gradle", "pluginManagement {}\n");
+    await writeFixture(
+      root,
+      "build.gradle",
+      [
+        "plugins { id 'org.jetbrains.kotlin.jvm' }",
+        "subprojects {",
+        "  apply plugin: 'com.android.library'",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "src/main/kotlin/com/example/api/OrderController.kt",
+      [
+        "package com.example.api",
+        "",
+        "import org.springframework.web.bind.annotation.RestController",
+        "",
+        "@RestController",
+        "class OrderController",
+        "",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const web = result.features.find((feature) =>
+      feature.title.startsWith("Kotlin server role web entrypoint "),
+    );
+
+    expect(web?.source).toBe("kotlin-server-role-web-entrypoint");
+    expect(
+      result.features.some((feature) => feature.source.startsWith("kotlin-android-role-")),
+    ).toBe(false);
+  });
+
   it("does not treat apply-false Android plugin declarations as Android modules", async () => {
     const root = await fixtureRoot("clawpatch-kotlin-android-apply-false-");
     await writeFixture(root, "settings.gradle.kts", "pluginManagement {}\n");
