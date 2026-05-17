@@ -3846,6 +3846,70 @@ describe("mapFeatures", () => {
     ).toBe(true);
   });
 
+  it("does not resolve dotted Kotlin built-in return types as framework roles", async () => {
+    const root = await fixtureRoot("clawpatch-kotlin-dotted-builtin-type-");
+    await writeFixture(root, "settings.gradle.kts", "pluginManagement {}\n");
+    await writeFixture(root, "build.gradle.kts", 'plugins { id("org.jetbrains.kotlin.jvm") }\n');
+    await writeFixture(
+      root,
+      "src/main/kotlin/com/example/api/Entries.kt",
+      [
+        "package com.example.api",
+        "",
+        "class Entries {",
+        "  fun first(): Map.Entry<String, String> = TODO()",
+        "}",
+        "",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+
+    expect(
+      result.features.some(
+        (feature) =>
+          feature.source === "kotlin-server-role-framework-component" &&
+          feature.ownedFiles.some(
+            (file) => file.path === "src/main/kotlin/com/example/api/Entries.kt",
+          ),
+      ),
+    ).toBe(false);
+  });
+
+  it("does not resolve JVM default return types through wildcard imports", async () => {
+    const root = await fixtureRoot("clawpatch-kotlin-jvm-default-wildcard-type-");
+    await writeFixture(root, "settings.gradle.kts", "pluginManagement {}\n");
+    await writeFixture(root, "build.gradle.kts", 'plugins { id("org.jetbrains.kotlin.jvm") }\n');
+    await writeFixture(
+      root,
+      "src/main/kotlin/com/example/jobs/JobFactory.kt",
+      [
+        "package com.example.jobs",
+        "",
+        "import org.scheduler.*",
+        "",
+        "class JobFactory {",
+        "  fun worker(): Runnable = Runnable { }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+
+    expect(
+      result.features.some(
+        (feature) =>
+          feature.source === "kotlin-server-role-framework-component" &&
+          feature.ownedFiles.some(
+            (file) => file.path === "src/main/kotlin/com/example/jobs/JobFactory.kt",
+          ),
+      ),
+    ).toBe(false);
+  });
+
   it("does not resolve explicitly imported Kotlin stdlib return types as framework roles", async () => {
     const root = await fixtureRoot("clawpatch-kotlin-stdlib-direct-type-");
     await writeFixture(root, "settings.gradle.kts", "pluginManagement {}\n");
