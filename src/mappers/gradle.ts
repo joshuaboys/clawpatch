@@ -1038,6 +1038,9 @@ function kotlinImportForType(
   if (isNestedType) {
     for (const full of info.imports.values()) {
       if (full.endsWith(".*")) {
+        if (kotlinPackageTypes.has(full.slice(0, -2))) {
+          continue;
+        }
         const wildcardType = `${full.slice(0, -1)}${type}`;
         if (!isKotlinStdlibImport(wildcardType)) {
           return wildcardType;
@@ -1048,6 +1051,9 @@ function kotlinImportForType(
   }
   for (const full of info.imports.values()) {
     if (full.endsWith(".*")) {
+      if (kotlinPackageTypes.has(full.slice(0, -2))) {
+        continue;
+      }
       const wildcardType = `${full.slice(0, -1)}${type}`;
       if (!isKotlinStdlibImport(wildcardType)) {
         return wildcardType;
@@ -1809,6 +1815,11 @@ function parseAndroidPluginAliases(source: string): Set<string> {
       pluginTableAlias = section.startsWith("plugins.") ? section.slice("plugins.".length) : null;
       continue;
     }
+    const topLevelPluginAlias = androidTopLevelPluginAliasForLine(line);
+    if (topLevelPluginAlias !== undefined) {
+      aliases.add(normalizeVersionCatalogAlias(topLevelPluginAlias));
+      continue;
+    }
     if (!inPlugins || !/com\.android\.(?:application|library|dynamic-feature|test)/u.test(line)) {
       continue;
     }
@@ -1818,6 +1829,13 @@ function parseAndroidPluginAliases(source: string): Set<string> {
     }
   }
   return aliases;
+}
+
+function androidTopLevelPluginAliasForLine(line: string): string | undefined {
+  if (!/com\.android\.(?:application|library|dynamic-feature|test)/u.test(line)) {
+    return undefined;
+  }
+  return /^plugins\.([A-Za-z0-9_.-]+?)(?:\.id)?\s*=/u.exec(line)?.[1];
 }
 
 function androidPluginAliasForLine(

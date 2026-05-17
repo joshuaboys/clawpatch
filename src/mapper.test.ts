@@ -3268,6 +3268,46 @@ describe("mapFeatures", () => {
     ).toBe(false);
   });
 
+  it("detects Android Kotlin roles from top-level dotted version-catalog plugin aliases", async () => {
+    const root = await fixtureRoot("clawpatch-kotlin-android-top-dotted-catalog-");
+    await writeFixture(root, "settings.gradle.kts", "pluginManagement {}\n");
+    await writeFixture(
+      root,
+      "gradle/libs.versions.toml",
+      ['plugins.agp = { id = "com.android.library", version = "8.0.0" }', ""].join("\n"),
+    );
+    await writeFixture(root, "build.gradle.kts", "plugins { alias(libs.plugins.agp) }\n");
+    await writeFixture(
+      root,
+      "src/main/kotlin/com/example/ui/MainViewModel.kt",
+      [
+        "package com.example.ui",
+        "",
+        "import androidx.lifecycle.ViewModel",
+        "",
+        "class MainViewModel : ViewModel()",
+        "",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const viewModel = result.features.find((feature) =>
+      feature.title.startsWith("Kotlin Android role view model "),
+    );
+
+    expect(viewModel?.source).toBe("kotlin-android-role-view-model");
+    expect(
+      result.features.some(
+        (feature) =>
+          feature.source === "kotlin-server-role-framework-component" &&
+          feature.ownedFiles.some(
+            (file) => file.path === "src/main/kotlin/com/example/ui/MainViewModel.kt",
+          ),
+      ),
+    ).toBe(false);
+  });
+
   it("detects Android Kotlin roles from plugin-specific version-catalog tables", async () => {
     const root = await fixtureRoot("clawpatch-kotlin-android-plugin-table-catalog-");
     await writeFixture(root, "settings.gradle.kts", "pluginManagement {}\n");
@@ -4675,6 +4715,44 @@ describe("mapFeatures", () => {
           ),
       ),
     ).toBe(false);
+  });
+
+  it("skips non-matching local Kotlin wildcard imports before external wildcards", async () => {
+    const root = await fixtureRoot("clawpatch-kotlin-local-wildcard-skip-");
+    await writeFixture(root, "settings.gradle.kts", "pluginManagement {}\n");
+    await writeFixture(root, "build.gradle.kts", 'plugins { id("org.jetbrains.kotlin.jvm") }\n');
+    await writeFixture(
+      root,
+      "src/main/kotlin/com/example/local/Other.kt",
+      "package com.example.local\nclass Other\n",
+    );
+    await writeFixture(
+      root,
+      "src/main/kotlin/com/example/jobs/JobFactory.kt",
+      [
+        "package com.example.jobs",
+        "",
+        "import com.example.local.*",
+        "import org.scheduler.*",
+        "",
+        "class JobFactory : JobFactoryBase()",
+        "",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const framework = result.features.find(
+      (feature) =>
+        feature.source === "kotlin-server-role-framework-component" &&
+        feature.ownedFiles.some(
+          (file) => file.path === "src/main/kotlin/com/example/jobs/JobFactory.kt",
+        ),
+    );
+
+    expect(framework?.ownedFiles[0]?.reason).toContain(
+      "inherits external type org.scheduler.JobFactoryBase",
+    );
   });
 
   it("does not resolve same-package Java declarations through wildcard imports", async () => {
