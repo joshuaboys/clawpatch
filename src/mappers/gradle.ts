@@ -485,6 +485,9 @@ async function gradleKotlinProjectIndex(
 async function gradleMainSourceFiles(root: string, moduleRoots: string[]): Promise<string[]> {
   const files = new Set<string>();
   for (const moduleRoot of moduleRoots) {
+    if ((await gradleBuildFile(root, moduleRoot)) === null) {
+      continue;
+    }
     const sourceRoot = moduleRoot === "." ? "src" : `${moduleRoot}/src`;
     for (const file of (await walk(root, [sourceRoot]))
       .filter(isGradleSourceFile)

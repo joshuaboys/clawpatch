@@ -3603,6 +3603,45 @@ describe("mapFeatures", () => {
     expect(framework?.ownedFiles[0]?.reason).not.toContain("org.scheduler.String");
   });
 
+  it("does not let settings-only root sources suppress module Kotlin wildcard evidence", async () => {
+    const root = await fixtureRoot("clawpatch-kotlin-settings-root-src-");
+    await writeFixture(root, "settings.gradle.kts", 'pluginManagement {}\ninclude(":app")\n');
+    await writeFixture(
+      root,
+      "src/main/kotlin/org/scheduler/Unused.kt",
+      "package org.scheduler\nclass Unused\n",
+    );
+    await writeFixture(
+      root,
+      "app/build.gradle.kts",
+      'plugins { id("org.jetbrains.kotlin.jvm") }\n',
+    );
+    await writeFixture(
+      root,
+      "app/src/main/kotlin/com/example/jobs/JobFactory.kt",
+      [
+        "package com.example.jobs",
+        "",
+        "import org.scheduler.*",
+        "",
+        "class JobFactory : JobFactoryBase()",
+        "",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const framework = result.features.find(
+      (feature) =>
+        feature.source === "kotlin-server-role-framework-component" &&
+        feature.ownedFiles.some(
+          (file) => file.path === "app/src/main/kotlin/com/example/jobs/JobFactory.kt",
+        ),
+    );
+
+    expect(framework?.ownedFiles[0]?.reason).toContain("org.scheduler.JobFactoryBase");
+  });
+
   it("does not treat Kotlin stdlib return types as framework components", async () => {
     const root = await fixtureRoot("clawpatch-kotlin-stdlib-type-map-");
     await writeFixture(root, "settings.gradle.kts", "pluginManagement {}\n");
