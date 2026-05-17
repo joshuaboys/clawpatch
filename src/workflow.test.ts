@@ -426,6 +426,7 @@ describe("workflow", () => {
     });
     expect(jsonReport).toMatchObject({
       findings: 1,
+      total: 1,
       items: [
         {
           id: expect.stringMatching(/^fnd_/u),
@@ -439,6 +440,15 @@ describe("workflow", () => {
       ],
     });
     expect(reviewedFeature?.analysisHistory.at(-1)?.summary).toContain("prompt=");
+    const aliased = jsonReport as {
+      findings: number;
+      total: number;
+      items: unknown[];
+      results: unknown[];
+    };
+    expect(aliased.total).toBe(aliased.findings);
+    expect(aliased.total).toBe(aliased.items.length);
+    expect(aliased.results).toBe(aliased.items);
     delete process.env["CLAWPATCH_PROVIDER"];
   });
 

@@ -499,10 +499,13 @@ export async function reportCommand(
     await writeFile(outputPath, output, "utf8");
   }
   if (context.options.json) {
+    const items = findingSummaries(filtered, scopedFeatures);
     return {
       findings: filtered.length,
+      total: filtered.length,
       output: outputPath,
-      items: findingSummaries(filtered, scopedFeatures),
+      items,
+      results: items,
     };
   }
   return {
