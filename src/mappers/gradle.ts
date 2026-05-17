@@ -2018,18 +2018,26 @@ function androidTopLevelPluginAliasForLine(line: string): string | undefined {
   if (!/com\.android\.(?:application|library|dynamic-feature|test)/u.test(line)) {
     return undefined;
   }
-  return /^plugins\.([A-Za-z0-9_.-]+?)(?:\.id)?\s*=/u.exec(line)?.[1];
+  return tomlPluginAliasKey(
+    /^plugins\.(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_.-]+?))(?:\.id)?\s*=/u.exec(line),
+  );
 }
 
 function androidPluginAliasForLine(
   line: string,
   pluginTableAlias: string | null,
 ): string | undefined {
-  const rawKey = /^([A-Za-z0-9_.-]+?)(?:\.id)?\s*=/u.exec(line)?.[1];
+  const rawKey = tomlPluginAliasKey(
+    /^(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_.-]+?))(?:\.id)?\s*=/u.exec(line),
+  );
   if (pluginTableAlias === null || rawKey === undefined || rawKey === "id") {
     return pluginTableAlias ?? rawKey;
   }
   return `${pluginTableAlias}.${rawKey}`;
+}
+
+function tomlPluginAliasKey(match: RegExpExecArray | null): string | undefined {
+  return match?.[1] ?? match?.[2] ?? match?.[3];
 }
 
 function hasAppliedAndroidPlugin(

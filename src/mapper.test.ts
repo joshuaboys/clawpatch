@@ -4589,6 +4589,46 @@ describe("mapFeatures", () => {
     ).toBe(false);
   });
 
+  it("detects Android Kotlin roles from quoted version-catalog plugin aliases", async () => {
+    const root = await fixtureRoot("clawpatch-kotlin-android-plugin-quoted-catalog-");
+    await writeFixture(root, "settings.gradle.kts", "pluginManagement {}\n");
+    await writeFixture(
+      root,
+      "gradle/libs.versions.toml",
+      ["[plugins]", '"agp.lib" = { id = "com.android.library", version = "8.0.0" }', ""].join("\n"),
+    );
+    await writeFixture(root, "build.gradle.kts", "plugins { alias(libs.plugins.agp.lib) }\n");
+    await writeFixture(
+      root,
+      "src/main/kotlin/com/example/ui/MainViewModel.kt",
+      [
+        "package com.example.ui",
+        "",
+        "import androidx.lifecycle.ViewModel",
+        "",
+        "class MainViewModel : ViewModel()",
+        "",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const viewModel = result.features.find((feature) =>
+      feature.title.startsWith("Kotlin Android role view model "),
+    );
+
+    expect(viewModel?.source).toBe("kotlin-android-role-view-model");
+    expect(
+      result.features.some(
+        (feature) =>
+          feature.source === "kotlin-server-role-framework-component" &&
+          feature.ownedFiles.some(
+            (file) => file.path === "src/main/kotlin/com/example/ui/MainViewModel.kt",
+          ),
+      ),
+    ).toBe(false);
+  });
+
   it("detects Android Kotlin roles from dotted-key version-catalog plugin aliases", async () => {
     const root = await fixtureRoot("clawpatch-kotlin-android-plugin-dotted-catalog-");
     await writeFixture(root, "settings.gradle.kts", "pluginManagement {}\n");
