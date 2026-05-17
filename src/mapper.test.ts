@@ -7808,6 +7808,28 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
     ]);
   });
 
+  it("bounds Rust integration tests attached to entrypoint features", async () => {
+    const root = await fixtureRoot("clawpatch-rust-test-bound-");
+    await writeFixture(root, "Cargo.toml", '[package]\nname = "rust-test-bound"\n');
+    await writeFixture(root, "src/lib.rs", "pub fn run() {}\n");
+    for (let index = 1; index <= 8; index += 1) {
+      await writeFixture(root, `tests/test_${index}.rs`, "#[test]\nfn works() {}\n");
+    }
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const library = result.features.find(
+      (feature) => feature.title === "Rust library rust-test-bound",
+    );
+    const integrationTests = result.features.filter(
+      (feature) => feature.source === "rust-integration-test",
+    );
+
+    expect(library?.tests).toHaveLength(5);
+    expect(library?.contextFiles).toHaveLength(5);
+    expect(integrationTests).toHaveLength(8);
+  });
+
   it("maps CMake C and C++ targets without duplicating main files", async () => {
     const root = await fixtureRoot("clawpatch-cmake-cpp-map-");
     await writeFixture(

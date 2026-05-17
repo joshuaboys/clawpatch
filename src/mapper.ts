@@ -26,6 +26,17 @@ export type MapResult = {
   stale: number;
 };
 
+export type MapProgressEvent = {
+  event: "mapper-start" | "mapper-done";
+  mapper: string;
+  seeds?: number;
+  elapsedMs?: number;
+};
+
+export type MapOptions = {
+  onProgress?: (event: MapProgressEvent) => void;
+};
+
 const featureMappers: FeatureMapper[] = [
   { name: "node", map: nodeSeeds },
   { name: "next", map: nextSeeds },
@@ -46,8 +57,9 @@ export async function mapFeatures(
   root: string,
   project: ProjectRecord,
   existing: FeatureRecord[],
+  options: MapOptions = {},
 ): Promise<MapResult> {
-  const seeds = await collectSeeds(root);
+  const seeds = await collectSeeds(root, options);
   return mapFeatureSeeds(root, project, existing, seeds);
 }
 
@@ -212,13 +224,26 @@ function uniqueTests(tests: Array<{ path: string; command: string | null }>): Ar
   return output;
 }
 
-async function collectSeeds(root: string): Promise<FeatureSeed[]> {
+async function collectSeeds(root: string, options: MapOptions): Promise<FeatureSeed[]> {
   const projects = await discoverNodeProjects(root);
   const context: MapperContext = {
     projects,
     taskGraph: await turboTaskGraph(root, projects),
   };
-  const groups = await Promise.all(featureMappers.map((mapper) => mapper.map(root, context)));
+  const groups = await Promise.all(
+    featureMappers.map(async (mapper) => {
+      const started = Date.now();
+      options.onProgress?.({ event: "mapper-start", mapper: mapper.name });
+      const seeds = await mapper.map(root, context);
+      options.onProgress?.({
+        event: "mapper-done",
+        mapper: mapper.name,
+        seeds: seeds.length,
+        elapsedMs: Date.now() - started,
+      });
+      return seeds;
+    }),
+  );
   return dedupeSeeds(groups.flat());
 }
 

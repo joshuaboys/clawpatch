@@ -11,6 +11,13 @@ import {
 } from "./shared.js";
 import { FeatureSeed } from "./types.js";
 
+const rustFeatureTestLimit = 5;
+
+type RustTestRef = {
+  path: string;
+  command: string | null;
+};
+
 export async function rustSeeds(root: string): Promise<FeatureSeed[]> {
   if (!(await pathExists(join(root, "Cargo.toml")))) {
     return [];
@@ -19,23 +26,25 @@ export async function rustSeeds(root: string): Promise<FeatureSeed[]> {
   const rootHasPackage = await hasCargoPackageManifest(root, "Cargo.toml");
   const rustTestCommand = "cargo test --workspace";
   const seeds: FeatureSeed[] = [];
+  const rootTests = rootHasPackage
+    ? await rustIntegrationTests(root, "tests", rustTestCommand)
+    : [];
+  const rootFeatureTests = rootTests.slice(0, rustFeatureTestLimit);
   if (rootHasPackage && (await isSafeFile(root, join(root, "src/main.rs")))) {
-    seeds.push(rustCommandSeed("src/main.rs", packageName, rustTestCommand));
+    seeds.push(rustCommandSeed("src/main.rs", packageName, rustTestCommand, rootFeatureTests));
   }
   if (rootHasPackage && (await isSafeFile(root, join(root, "src/lib.rs")))) {
-    seeds.push(rustLibrarySeed("src/lib.rs", packageName, rustTestCommand));
+    seeds.push(rustLibrarySeed("src/lib.rs", packageName, rustTestCommand, rootFeatureTests));
   }
   if (rootHasPackage) {
     for (const file of (await walk(root, ["src/bin"])).filter((candidate) =>
       /^src\/bin\/([^/]+\.rs|[^/]+\/main\.rs)$/u.test(candidate),
     )) {
-      seeds.push(rustCommandSeed(file, rustBinCommand(file), rustTestCommand));
+      seeds.push(rustCommandSeed(file, rustBinCommand(file), rustTestCommand, rootFeatureTests));
     }
-    for (const file of (await walk(root, ["tests"])).filter((candidate) =>
-      /^tests\/[^/]+\.rs$/u.test(candidate),
-    )) {
-      const name = file.split("/").at(-1)?.replace(/\.rs$/u, "") ?? "integration";
-      seeds.push(rustIntegrationTestSeed(file, name, rustTestCommand));
+    for (const test of rootTests) {
+      const name = test.path.split("/").at(-1)?.replace(/\.rs$/u, "") ?? "integration";
+      seeds.push(rustIntegrationTestSeed(test.path, name, rustTestCommand));
     }
   }
   for (const member of await rustMemberDirs(root)) {
@@ -44,20 +53,22 @@ export async function rustSeeds(root: string): Promise<FeatureSeed[]> {
     const memberName = await rustPackageName(root, `${memberDir}/Cargo.toml`, memberFallback);
     const memberMain = `${memberDir}/src/main.rs`;
     const memberLib = `${memberDir}/src/lib.rs`;
+    const memberTests = await rustIntegrationTests(root, `${memberDir}/tests`, member.testCommand);
+    const memberFeatureTests = memberTests.slice(0, rustFeatureTestLimit);
     if (await isSafeFile(root, join(root, memberMain))) {
-      seeds.push(rustCommandSeed(memberMain, memberName, member.testCommand));
+      seeds.push(rustCommandSeed(memberMain, memberName, member.testCommand, memberFeatureTests));
     }
     if (await isSafeFile(root, join(root, memberLib))) {
-      seeds.push(rustLibrarySeed(memberLib, memberName, member.testCommand));
+      seeds.push(rustLibrarySeed(memberLib, memberName, member.testCommand, memberFeatureTests));
     }
     for (const file of (await walk(root, [`${memberDir}/src/bin`])).filter(isRustBinFile)) {
-      seeds.push(rustCommandSeed(file, rustBinCommand(file), member.testCommand));
+      seeds.push(
+        rustCommandSeed(file, rustBinCommand(file), member.testCommand, memberFeatureTests),
+      );
     }
-    for (const file of (await walk(root, [`${memberDir}/tests`])).filter((candidate) =>
-      /\/tests\/[^/]+\.rs$/u.test(candidate),
-    )) {
-      const name = file.split("/").at(-1)?.replace(/\.rs$/u, "") ?? "integration";
-      seeds.push(rustIntegrationTestSeed(file, `${memberName}/${name}`, member.testCommand));
+    for (const test of memberTests) {
+      const name = test.path.split("/").at(-1)?.replace(/\.rs$/u, "") ?? "integration";
+      seeds.push(rustIntegrationTestSeed(test.path, `${memberName}/${name}`, member.testCommand));
     }
   }
   return seeds;
@@ -228,6 +239,7 @@ function rustCommandSeed(
   file: string,
   command: string,
   testCommand: string | null = null,
+  tests: RustTestRef[] = [],
 ): FeatureSeed {
   return {
     title: `Rust command ${command}`,
@@ -241,7 +253,9 @@ function rustCommandSeed(
     command,
     tags: ["rust", "cli"],
     trustBoundaries: ["user-input", "filesystem", "process-exec", "network"],
+    tests,
     testCommand,
+    skipNearbyTests: true,
   };
 }
 
@@ -249,6 +263,7 @@ function rustLibrarySeed(
   file: string,
   name: string,
   testCommand: string | null = null,
+  tests: RustTestRef[] = [],
 ): FeatureSeed {
   return {
     title: `Rust library ${name}`,
@@ -262,7 +277,9 @@ function rustLibrarySeed(
     command: null,
     tags: ["rust", "library"],
     trustBoundaries: packageTrustBoundaries(name),
+    tests,
     testCommand,
+    skipNearbyTests: true,
   };
 }
 
@@ -297,7 +314,22 @@ function rustIntegrationTestSeed(
     tags: ["rust", "test"],
     trustBoundaries: [],
     testCommand,
+    skipNearbyTests: true,
   };
+}
+
+async function rustIntegrationTests(
+  root: string,
+  prefix: string,
+  command: string | null,
+): Promise<RustTestRef[]> {
+  return (await walk(root, [prefix]))
+    .filter((candidate) => new RegExp(`^${escapeRegExp(prefix)}/[^/]+\\.rs$`, "u").test(candidate))
+    .map((path) => ({ path, command }));
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 async function rustPackageName(

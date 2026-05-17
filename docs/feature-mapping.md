@@ -59,7 +59,9 @@ Supported deterministic mappers today:
 
 The default mapper does not call a model. It uses repo conventions and cheap
 filesystem walks, skips symlinked directories, and excludes common generated
-folders.
+folders. `map` emits progress to stderr unless `--quiet` is set, including
+deterministic mapper start/done events, agent mapper decisions, write progress,
+and elapsed time. JSON output stays on stdout.
 
 When deterministic mapping is too shallow, `clawpatch map --source auto` can ask
 the configured provider to split the repository into reviewable feature slices.

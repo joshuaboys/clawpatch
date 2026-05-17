@@ -1055,6 +1055,37 @@ describe("workflow", () => {
     expect(features.some((feature) => feature.status === "skipped")).toBe(false);
   });
 
+  it("emits map progress to stderr while preserving JSON stdout", async () => {
+    const root = await fixtureRoot("clawpatch-map-progress-");
+    await writeFixture(root, "Cargo.toml", '[package]\nname = "map-progress"\nversion = "0.1.0"\n');
+    await writeFixture(root, "src/lib.rs", "pub fn run() {}\n");
+
+    await runCli(["--root", root, "--json", "--quiet", "init"]);
+    const mapped = await runCli(["--root", root, "--json", "map"]);
+
+    expect(JSON.parse(mapped.stdout)).toMatchObject({ features: expect.any(Number) });
+    expect(mapped.stderr).toContain("clawpatch map start");
+    expect(mapped.stderr).toContain("clawpatch map mapper-start mapper=rust");
+    expect(mapped.stderr).toContain("clawpatch map mapper-done mapper=rust");
+    expect(mapped.stderr).toContain("clawpatch map done");
+  });
+
+  it("suppresses map progress when quiet", async () => {
+    const root = await fixtureRoot("clawpatch-map-progress-quiet-");
+    await writeFixture(
+      root,
+      "Cargo.toml",
+      '[package]\nname = "map-progress-quiet"\nversion = "0.1.0"\n',
+    );
+    await writeFixture(root, "src/lib.rs", "pub fn run() {}\n");
+
+    await runCli(["--root", root, "--json", "--quiet", "init"]);
+    const mapped = await runCli(["--root", root, "--json", "--quiet", "map"]);
+
+    expect(JSON.parse(mapped.stdout)).toMatchObject({ features: expect.any(Number) });
+    expect(mapped.stderr).toBe("");
+  });
+
   it("can use the configured provider as an agent mapper source", async () => {
     const root = await fixtureRoot("clawpatch-agent-map-");
     await writeFixture(root, "agent/worker.custom", "worker source\n");
