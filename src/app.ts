@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { appendFile, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { hostname } from "node:os";
 import {
@@ -230,6 +230,37 @@ export async function statusCommand(context: AppContext): Promise<unknown> {
     activeLocks: activeLockIds.size,
     lockFiles: lockFileIds.length,
     lastRun: runs.at(-1)?.runId ?? null,
+  };
+}
+
+export async function ciCommand(
+  context: AppContext,
+  flags: Record<string, string | boolean>,
+): Promise<unknown> {
+  const initialized = await ensureInitialized(context);
+  const mapFlags = providerFlagSubset(flags);
+  const reviewFlags = reviewFlagSubset(flags);
+  const mapped = await mapCommand(context, mapFlags);
+  const reviewed = await reviewCommand(context, reviewFlags);
+  const reportFlags = reportFlagSubset(flags);
+  const report = (await reportCommand(context, reportFlags)) as {
+    findings?: number;
+    output?: string | null;
+    markdown?: string;
+  };
+  const summary = renderCiSummary({ initialized, mapped, reviewed, report });
+  const githubStepSummary = process.env["GITHUB_STEP_SUMMARY"];
+  if (githubStepSummary !== undefined && githubStepSummary.length > 0) {
+    await appendFile(githubStepSummary, summary, "utf8");
+  }
+  return {
+    initialized,
+    mapped: numberField(mapped, "features"),
+    reviewed: numberField(reviewed, "reviewed"),
+    findings: numberField(reviewed, "findings") ?? report.findings ?? 0,
+    report: report.output ?? null,
+    githubStepSummary: githubStepSummary ?? null,
+    next: stringField(reviewed, "next") ?? "clawpatch status",
   };
 }
 
@@ -1055,6 +1086,17 @@ async function loadProjectState(context: AppContext) {
   return { root: context.root, config, paths, project };
 }
 
+async function ensureInitialized(context: AppContext): Promise<boolean> {
+  const config = await loadConfig(context.root, context.options);
+  const paths = statePaths(resolveStateDir(context.root, config));
+  if ((await readProject(paths)) !== null) {
+    await ensureStateDirs(paths);
+    return false;
+  }
+  await initCommand(context, {});
+  return true;
+}
+
 function applyProviderFlags(
   config: Awaited<ReturnType<typeof loadConfig>>,
   flags: Record<string, string | boolean>,
@@ -1072,6 +1114,74 @@ function applyProviderFlags(
       skipGitRepoCheck: flags["skipGitRepoCheck"] === true,
     },
   };
+}
+
+function providerFlagSubset(flags: Record<string, string | boolean>): Record<string, string> {
+  const subset: Record<string, string> = {};
+  for (const flag of ["provider", "model", "reasoningEffort"] as const) {
+    const value = stringFlag(flags, flag);
+    if (value !== undefined) {
+      subset[flag] = value;
+    }
+  }
+  return subset;
+}
+
+function reviewFlagSubset(flags: Record<string, string | boolean>): Record<string, string> {
+  const subset = providerFlagSubset(flags);
+  for (const flag of ["since", "limit", "jobs"] as const) {
+    const value = stringFlag(flags, flag);
+    if (value !== undefined) {
+      subset[flag] = value;
+    }
+  }
+  return subset;
+}
+
+function reportFlagSubset(flags: Record<string, string | boolean>): Record<string, string> {
+  const output = stringFlag(flags, "output");
+  return output === undefined ? {} : { output };
+}
+
+function renderCiSummary(input: {
+  initialized: boolean;
+  mapped: unknown;
+  reviewed: unknown;
+  report: { findings?: number; output?: string | null };
+}): string {
+  const lines = [
+    "## Clawpatch review",
+    "",
+    `- initialized: ${input.initialized ? "yes" : "no"}`,
+    `- mapped features: ${numberField(input.mapped, "features") ?? "unknown"}`,
+    `- reviewed features: ${numberField(input.reviewed, "reviewed") ?? 0}`,
+    `- findings: ${numberField(input.reviewed, "findings") ?? input.report.findings ?? 0}`,
+  ];
+  if (input.report.output !== undefined && input.report.output !== null) {
+    lines.push(`- report: ${input.report.output}`);
+  }
+  const next = stringField(input.reviewed, "next");
+  if (next !== undefined) {
+    lines.push(`- next: \`${next}\``);
+  }
+  lines.push("");
+  return `${lines.join("\n")}\n`;
+}
+
+function numberField(value: unknown, field: string): number | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const candidate = (value as Record<string, unknown>)[field];
+  return typeof candidate === "number" ? candidate : null;
+}
+
+function stringField(value: unknown, field: string): string | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const candidate = (value as Record<string, unknown>)[field];
+  return typeof candidate === "string" ? candidate : undefined;
 }
 
 function providerOptions(config: ReturnType<typeof applyProviderFlags>) {

@@ -2,6 +2,7 @@
 
 ## 0.3.1 - Unreleased
 
+- Added `clawpatch ci` to initialize, map, review, write a report, and append a GitHub Actions step summary in one CI-friendly command.
 - Hardened review ingestion so provider findings must cite included files with valid line ranges and matching evidence quotes.
 
 ## 0.3.0 - 2026-05-18
