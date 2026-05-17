@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import {
   cleanLocksCommand,
+  ciCommand,
   doctorCommand,
   fixCommand,
   initCommand,
@@ -51,6 +52,8 @@ async function dispatch(
       return statusCommand(context);
     case "review":
       return reviewCommand(context, flags);
+    case "ci":
+      return ciCommand(context, flags);
     case "report":
       return reportCommand(context, flags);
     case "show":
@@ -160,6 +163,15 @@ const commandFlags = {
     "reasoningEffort",
     "skipGitRepoCheck",
     "dryRun",
+  ]),
+  ci: new Set([
+    "limit",
+    "since",
+    "jobs",
+    "provider",
+    "model",
+    "reasoningEffort",
+    "output",
   ]),
   report: new Set(["status", "severity", "feature", "project", "category", "triage", "output"]),
   show: new Set(["finding"]),
@@ -412,6 +424,24 @@ Flags:
 `);
     return;
   }
+  if (command === "ci") {
+    process.stdout.write(`clawpatch ci
+
+Usage:
+  clawpatch ci [flags]
+
+Flags:
+  --since <ref>
+  --limit <n>
+  --jobs <n>        default: 10
+  --provider <name>
+  --model <name>
+  --reasoning-effort <none|minimal|low|medium|high|xhigh>
+  --output <path>
+  --json
+`);
+    return;
+  }
   if (command === "show") {
     process.stdout.write(`clawpatch show
 
@@ -568,6 +598,7 @@ Commands:
   map
   status
   review
+  ci
   report
   show
   next

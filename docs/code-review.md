@@ -49,6 +49,19 @@ If no features are touched by the diff, `review` exits cleanly with no findings.
 The same flag is available on `revalidate`; revalidation scopes open findings to
 features whose owned files changed.
 
+### CI command
+
+Use `clawpatch ci` when a GitHub Actions job should run the whole read-only
+review loop:
+
+```bash
+clawpatch ci --since origin/main --limit 20 --jobs 4 --output clawpatch-report.md
+```
+
+The command initializes `.clawpatch/` if needed, maps features, reviews the
+selected feature set, writes a Markdown report when `--output` is provided, and
+appends a compact summary to `GITHUB_STEP_SUMMARY` when that file is available.
+
 Progress uses stderr so `--json` stdout remains machine-readable. The worker
 pool is per-process, and lock files under `.clawpatch/locks/` prevent
 overlapping review processes from claiming the same feature. Interrupted runs

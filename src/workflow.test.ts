@@ -15,6 +15,7 @@ import { delimiter, join } from "node:path";
 import {
   fixCommand,
   cleanLocksCommand,
+  ciCommand,
   doctorCommand,
   initCommand,
   makeContext,
@@ -259,6 +260,24 @@ describe("workflow", () => {
     expect(() => parseArgs(["review", "--mode", "slop"])).toThrow(
       "invalid --mode; expected default or deslopify",
     );
+    expect(
+      parseArgs([
+        "ci",
+        "--since",
+        "origin/main",
+        "--limit",
+        "2",
+        "--jobs",
+        "1",
+        "--output",
+        "report.md",
+      ]).flags,
+    ).toMatchObject({
+      since: "origin/main",
+      limit: "2",
+      jobs: "1",
+      output: "report.md",
+    });
     expect(parseArgs(["revalidate", "--since", "origin/main"]).flags).toMatchObject({
       since: "origin/main",
     });
@@ -380,6 +399,55 @@ describe("workflow", () => {
       ],
     });
     delete process.env["CLAWPATCH_PROVIDER"];
+  });
+
+  it("runs CI review flow and appends a GitHub step summary", async () => {
+    const root = await fixtureRoot("clawpatch-ci-");
+    await writeFixture(
+      root,
+      "package.json",
+      JSON.stringify({
+        name: "ci-flow",
+        bin: { app: "src/index.ts" },
+        scripts: { test: "vitest run" },
+      }),
+    );
+    await writeFixture(root, "src/index.ts", "export const value = 'TODO_BUG';\n");
+    const summaryPath = join(root, "summary.md");
+    const reportPath = join(root, "review.md");
+    const previousProvider = process.env["CLAWPATCH_PROVIDER"];
+    const previousSummary = process.env["GITHUB_STEP_SUMMARY"];
+    process.env["CLAWPATCH_PROVIDER"] = "mock";
+    process.env["GITHUB_STEP_SUMMARY"] = summaryPath;
+    try {
+      const context = await makeContext(testOptions(root));
+      const result = await ciCommand(context, { limit: "1", jobs: "1", output: reportPath });
+      const summary = await readFile(summaryPath, "utf8");
+      const report = await readFile(reportPath, "utf8");
+
+      expect(result).toMatchObject({
+        initialized: true,
+        mapped: expect.any(Number),
+        reviewed: 1,
+        findings: 1,
+        report: reportPath,
+        githubStepSummary: summaryPath,
+      });
+      expect(summary).toContain("## Clawpatch review");
+      expect(summary).toContain("- findings: 1");
+      expect(report).toContain("# clawpatch report");
+    } finally {
+      if (previousProvider === undefined) {
+        delete process.env["CLAWPATCH_PROVIDER"];
+      } else {
+        process.env["CLAWPATCH_PROVIDER"] = previousProvider;
+      }
+      if (previousSummary === undefined) {
+        delete process.env["GITHUB_STEP_SUMMARY"];
+      } else {
+        process.env["GITHUB_STEP_SUMMARY"] = previousSummary;
+      }
+    }
   });
 
   it.runIf(process.platform !== "win32")(
