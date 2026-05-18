@@ -11,6 +11,7 @@
 - Added `clawpatch open-pr --patch <id>` to turn an applied patch attempt into an explicit GitHub pull request.
 - Added review prompt provenance and budget accounting for included files, omitted files, prompt bytes, and approximate tokens.
 - Hardened review ingestion so provider findings must cite included files with valid line ranges and matching evidence quotes.
+- Fixed `clawpatch open-pr` so repositories without default-branch metadata use a dedicated patch branch and let GitHub choose the PR base.
 - Fixed provider commands with relative `--root` paths by canonicalizing explicit roots before invoking Codex or other providers.
 - Added first-pass Elixir Mix/Phoenix mapping for project metadata, contexts, Phoenix web slices, runtime config, Ecto migrations, project scripts, ExUnit tests, and Mix validation defaults, thanks @tears-mysthrala.
 - Improved `clawpatch fix` handoff context and patch-attempt changed-file auditing for dirty-worktree fixes.

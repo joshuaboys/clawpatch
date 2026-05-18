@@ -930,7 +930,7 @@ export async function openPrCommand(
   if (git.root === null) {
     throw new ClawpatchError("open-pr requires a git repository", 2, "not-git-repository");
   }
-  const base = stringFlag(flags, "base") ?? git.defaultBranch ?? "main";
+  const base = stringFlag(flags, "base") ?? git.defaultBranch;
   const branch = prBranchName(patch, stringFlag(flags, "branch"), git.currentBranch, base);
   const findings = await readFindings(loaded.paths);
   const linkedFindings = findings.filter((finding) => patch.findingIds.includes(finding.findingId));
@@ -998,8 +998,6 @@ export async function openPrCommand(
   const ghArgs = [
     "pr",
     "create",
-    "--base",
-    base,
     "--head",
     branch,
     "--title",
@@ -1007,6 +1005,9 @@ export async function openPrCommand(
     "--body-file",
     "-",
   ];
+  if (base !== null) {
+    ghArgs.splice(2, 0, "--base", base);
+  }
   if (flags["draft"] === true) {
     ghArgs.push("--draft");
   }
@@ -1242,7 +1243,7 @@ function prBranchName(
   patch: PatchAttempt,
   explicit: string | undefined,
   currentBranch: string | null,
-  base: string,
+  base: string | null,
 ): string {
   if (explicit !== undefined) {
     return explicit;
@@ -1256,6 +1257,7 @@ function prBranchName(
     return patch.git.branchName;
   }
   if (
+    base !== null &&
     currentBranch !== null &&
     currentBranch !== base &&
     currentBranch !== "main" &&
@@ -1340,7 +1342,7 @@ function gitRelativePatchFiles(gitRoot: string, projectRoot: string, files: stri
 function plannedPrCommands(
   patch: PatchAttempt,
   branch: string,
-  base: string,
+  base: string | null,
   title: string,
 ): string[] {
   const commands: string[] = [];
@@ -1350,7 +1352,8 @@ function plannedPrCommands(
     commands.push(`git commit -m ${title}`);
   }
   commands.push(`git push -u origin ${branch}`);
-  commands.push(`gh pr create --base ${base} --head ${branch} --title ${title} --body-file -`);
+  const baseArg = base === null ? "" : `--base ${base} `;
+  commands.push(`gh pr create ${baseArg}--head ${branch} --title ${title} --body-file -`);
   return commands;
 }
 

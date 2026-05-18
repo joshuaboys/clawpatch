@@ -2767,6 +2767,72 @@ describe("workflow", () => {
     }
   });
 
+  it("uses a patch branch when the PR base is unknown", async () => {
+    const root = await fixtureRoot("clawpatch-open-pr-unknown-base-");
+    await writeFixture(
+      root,
+      "package.json",
+      JSON.stringify({ name: "open-pr-unknown-base", bin: { open: "src/index.ts" } }),
+    );
+    await writeFixture(root, "src/index.ts", "export const value = 'TODO_BUG';\n");
+    await initGit(root);
+    await checkCommand(root, "git branch -m develop");
+    await checkCommand(root, "git add package.json src/index.ts");
+    await checkCommand(root, 'git -c commit.gpgsign=false commit -q -m "base"');
+    const context = await makeContext(testOptions(root));
+    const paths = statePaths(join(root, ".clawpatch"));
+    await initCommand(context, {});
+    await writeFixture(root, "src/index.ts", "export const value = 'fixed';\n");
+    const now = new Date().toISOString();
+    await writePatchAttempt(paths, {
+      schemaVersion: 1,
+      patchAttemptId: "pat_open_pr_unknown_base",
+      findingIds: [],
+      featureIds: [],
+      status: "applied",
+      plan: "Replace the marker value.",
+      filesChanged: ["src/index.ts"],
+      commandsRun: [],
+      testResults: [
+        {
+          command: "pnpm test",
+          cwd: root,
+          exitCode: 0,
+          durationMs: 1,
+          stdout: "",
+          stderr: "",
+        },
+      ],
+      provider: null,
+      git: {
+        baseSha: (await runCommand("git rev-parse HEAD", root)).stdout.trim(),
+        commitSha: null,
+        branchName: null,
+        prUrl: null,
+      },
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const preview = await openPrCommand(context, {
+      patch: "pat_open_pr_unknown_base",
+      dryRun: true,
+    });
+
+    expect(preview).toMatchObject({
+      branch: "clawpatch/pat_open_pr_unknown_base",
+      base: null,
+    });
+    expect(preview).toMatchObject({
+      commands: expect.arrayContaining([
+        expect.stringContaining("gh pr create --head clawpatch/pat_open_pr_unknown_base"),
+      ]),
+    });
+    expect(preview).toMatchObject({
+      commands: expect.not.arrayContaining([expect.stringContaining("--base main")]),
+    });
+  });
+
   it("persists the patch commit before failing external PR creation", async () => {
     const root = await fixtureRoot("clawpatch-open-pr-retry-");
     await writeFixture(
