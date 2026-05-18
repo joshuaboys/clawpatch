@@ -1,4 +1,4 @@
-import { appendFile, writeFile } from "node:fs/promises";
+import { appendFile, stat, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { hostname } from "node:os";
 import {
@@ -950,16 +950,35 @@ export async function openPrCommand(
     };
   }
 
-  await assertPatchWorktree(patch, git.root, loaded.paths.stateDir, gitFiles, force);
+  const patchWorktree = await assertPatchWorktree(
+    patch,
+    git.root,
+    loaded.paths.stateDir,
+    gitFiles,
+    force,
+  );
+  const { commitFiles } = patchWorktree;
   let commitSha = patch.git.commitSha;
   if (commitSha === null) {
     if (git.currentBranch !== branch) {
       await checkedRun("git switch", runCommandArgs("git", ["switch", "-c", branch], git.root));
     }
-    await checkedRun("git add", runCommandArgs("git", ["add", "--", ...gitFiles], git.root));
+    const stagedOnlyFiles = new Set(patchWorktree.stagedOnlyFiles);
+    const stageableFiles = commitFiles.filter((file) => !stagedOnlyFiles.has(file));
+    const addFiles = await existingGitFiles(git.root, stageableFiles);
+    const updateFiles = stageableFiles.filter((file) => !addFiles.includes(file));
+    if (addFiles.length > 0) {
+      await checkedRun("git add", runCommandArgs("git", ["add", "--", ...addFiles], git.root));
+    }
+    if (updateFiles.length > 0) {
+      await checkedRun(
+        "git add -u",
+        runCommandArgs("git", ["add", "-u", "--", ...updateFiles], git.root),
+      );
+    }
     await checkedRun(
       "git commit",
-      runCommandArgs("git", ["commit", "-m", title, "--", ...gitFiles], git.root),
+      runCommandArgs("git", ["commit", "-m", title, "--", ...commitFiles], git.root),
     );
     const commit = await checkedRun(
       "git rev-parse",
@@ -1338,9 +1357,9 @@ async function assertPatchWorktree(
   stateDir: string,
   gitFiles: string[],
   force: boolean,
-): Promise<void> {
+): Promise<{ commitFiles: string[]; stagedOnlyFiles: string[] }> {
   if (patch.git.commitSha !== null) {
-    return;
+    return { commitFiles: gitFiles, stagedOnlyFiles: [] };
   }
   const status = await checkedRun(
     "git status",
@@ -1354,14 +1373,27 @@ async function assertPatchWorktree(
       },
     ),
   );
-  const dirty = gitStatusPaths(status.stdout);
+  const statusChanges = gitStatusChanges(status.stdout);
+  const dirty = uniqueStrings(statusChanges.flatMap((change) => change.paths));
   const statePrefix = gitRelativePathPrefix(gitRoot, stateDir);
   const sourceDirty = dirty.filter((file) => !isStatePath(file, statePrefix));
   if (sourceDirty.length === 0) {
     throw new ClawpatchError("no uncommitted patch changes to commit", 2, "invalid-input");
   }
   const expected = new Set(gitFiles);
-  const extra = sourceDirty.filter((file) => !expected.has(file));
+  const commitFiles = new Set(gitFiles);
+  const stagedOnlyFiles = new Set<string>();
+  for (const change of statusChanges) {
+    if (change.secondaryPath === undefined) {
+      continue;
+    }
+    if (expected.has(change.primaryPath) || expected.has(change.secondaryPath)) {
+      commitFiles.add(change.primaryPath);
+      commitFiles.add(change.secondaryPath);
+      stagedOnlyFiles.add(change.secondaryPath);
+    }
+  }
+  const extra = sourceDirty.filter((file) => !commitFiles.has(file));
   if (extra.length > 0 && !force) {
     throw new ClawpatchError(
       `dirty worktree has files outside patch attempt: ${extra.join(", ")}`,
@@ -1377,22 +1409,37 @@ async function assertPatchWorktree(
       "invalid-input",
     );
   }
+  return { commitFiles: [...commitFiles], stagedOnlyFiles: [...stagedOnlyFiles] };
 }
 
-function gitStatusPaths(output: string): string[] {
+type GitStatusChange = {
+  paths: string[];
+  primaryPath: string;
+  secondaryPath: string | undefined;
+};
+
+function gitStatusChanges(output: string): GitStatusChange[] {
   const fields = output.split("\0").filter((field) => field.length > 0);
-  const paths: string[] = [];
+  const changes: GitStatusChange[] = [];
   for (let index = 0; index < fields.length; index += 1) {
     const field = fields[index] ?? "";
     if (field.length < 4) {
       continue;
     }
-    paths.push(field.slice(3));
-    if (/[RC]/u.test(field.slice(0, 2))) {
+    const status = field.slice(0, 2);
+    const primaryPath = normalizePath(field.slice(3));
+    const paths = [primaryPath];
+    let secondaryPath: string | undefined;
+    if (/[RC]/u.test(status)) {
+      secondaryPath = normalizePath(fields[index + 1] ?? "");
+      if (secondaryPath.length > 0) {
+        paths.push(secondaryPath);
+      }
       index += 1;
     }
+    changes.push({ paths, primaryPath, secondaryPath });
   }
-  return paths.map(normalizePath);
+  return changes;
 }
 
 function isStatePath(file: string, statePrefix: string): boolean {
@@ -1441,6 +1488,19 @@ function firstUrl(output: string): string | null {
 
 function normalizePath(path: string): string {
   return path.replace(/\\/gu, "/");
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+async function existingGitFiles(root: string, files: string[]): Promise<string[]> {
+  const existing = await Promise.all(
+    files.map(async (file) =>
+      (await stat(resolve(root, file)).catch(() => null)) === null ? null : file,
+    ),
+  );
+  return existing.filter((file): file is string => file !== null);
 }
 
 function normalizeDarwinPrivateVar(path: string): string {

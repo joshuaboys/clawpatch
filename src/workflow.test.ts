@@ -2941,6 +2941,79 @@ describe("workflow", () => {
     }
   });
 
+  it("opens PRs for staged renames when patch records only the destination", async () => {
+    const root = await fixtureRoot("clawpatch-open-pr-rename-");
+    await writeFixture(root, "package.json", JSON.stringify({ name: "open-pr-rename" }));
+    await writeFixture(root, "docs/old.md", "TODO_BUG\n");
+    await initGit(root);
+    await checkCommand(root, "git add package.json docs");
+    await checkCommand(root, 'git -c commit.gpgsign=false commit -q -m "base"');
+    const origin = await fixtureRoot("clawpatch-open-pr-rename-origin-");
+    await checkCommand(root, `git init --bare -q ${origin}`);
+    await checkCommand(root, `git remote add origin ${origin}`);
+    const context = await makeContext(testOptions(root));
+    const paths = statePaths(join(root, ".clawpatch"));
+    await initCommand(context, {});
+    await checkCommand(root, "git mv docs/old.md docs/new.md");
+    const now = new Date().toISOString();
+    await writePatchAttempt(paths, {
+      schemaVersion: 1,
+      patchAttemptId: "pat_open_pr_rename",
+      findingIds: [],
+      featureIds: [],
+      status: "applied",
+      plan: "Rename the reviewed file.",
+      filesChanged: ["docs/new.md"],
+      commandsRun: [],
+      testResults: [
+        {
+          command: "pnpm test",
+          cwd: root,
+          exitCode: 0,
+          durationMs: 1,
+          stdout: "",
+          stderr: "",
+        },
+      ],
+      provider: null,
+      git: {
+        baseSha: (await runCommand("git rev-parse HEAD", root)).stdout.trim(),
+        commitSha: null,
+        branchName: null,
+        prUrl: null,
+      },
+      createdAt: now,
+      updatedAt: now,
+    });
+    const ghScripts = await fixtureRoot("clawpatch-open-pr-rename-gh-");
+    const successGh = join(ghScripts, "success-gh.sh");
+    await writeFixture(
+      ghScripts,
+      "success-gh.sh",
+      "#!/bin/sh\necho https://github.com/openclaw/clawpatch/pull/1001\n",
+    );
+    await chmod(successGh, 0o755);
+    const previousGh = process.env["CLAWPATCH_GH"];
+    try {
+      process.env["CLAWPATCH_GH"] = successGh;
+      const opened = (await openPrCommand(context, {
+        patch: "pat_open_pr_rename",
+        base: "main",
+        branch: "clawpatch/pat_open_pr_rename",
+      })) as { commit: string; pr: string };
+      const committed = await runCommand(`git show --name-status --format= ${opened.commit}`, root);
+
+      expect(opened.pr).toBe("https://github.com/openclaw/clawpatch/pull/1001");
+      expect(committed.stdout.trim()).toBe("R100\tdocs/old.md\tdocs/new.md");
+    } finally {
+      if (previousGh === undefined) {
+        delete process.env["CLAWPATCH_GH"];
+      } else {
+        process.env["CLAWPATCH_GH"] = previousGh;
+      }
+    }
+  });
+
   it("persists failed patch attempts when provider fix throws", async () => {
     const root = await fixtureRoot("clawpatch-fix-fail-");
     await runCommand(
