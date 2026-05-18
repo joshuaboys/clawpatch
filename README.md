@@ -179,7 +179,8 @@ to features so runs can resume and be audited.
 - Review does not edit files.
 - Fix is explicit and selected by finding ID.
 - Fix refuses a dirty source worktree by default.
-- Clawpatch never commits, pushes, opens PRs, or lands changes today.
+- Clawpatch commits, pushes, and opens PRs only from explicit patch commands such as `open-pr`.
+- Clawpatch does not land changes today.
 - Provider output is parsed through strict schemas.
 - Symlinked directories and generated build output are skipped during mapping.
 

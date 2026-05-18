@@ -1137,18 +1137,21 @@ function applyProviderFlags(
   };
 }
 
-function providerFlagSubset(flags: Record<string, string | boolean>): Record<string, string> {
-  const subset: Record<string, string> = {};
+function providerFlagSubset(flags: Record<string, string | boolean>): Record<string, string | boolean> {
+  const subset: Record<string, string | boolean> = {};
   for (const flag of ["provider", "model", "reasoningEffort"] as const) {
     const value = stringFlag(flags, flag);
     if (value !== undefined) {
       subset[flag] = value;
     }
   }
+  if (flags["skipGitRepoCheck"] === true) {
+    subset["skipGitRepoCheck"] = true;
+  }
   return subset;
 }
 
-function reviewFlagSubset(flags: Record<string, string | boolean>): Record<string, string> {
+function reviewFlagSubset(flags: Record<string, string | boolean>): Record<string, string | boolean> {
   const subset = providerFlagSubset(flags);
   for (const flag of ["since", "limit", "jobs"] as const) {
     const value = stringFlag(flags, flag);

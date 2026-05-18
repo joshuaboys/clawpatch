@@ -174,6 +174,7 @@ const commandFlags = {
     "provider",
     "model",
     "reasoningEffort",
+    "skipGitRepoCheck",
     "output",
   ]),
   report: new Set(["status", "severity", "feature", "project", "category", "triage", "output"]),
@@ -447,6 +448,7 @@ Flags:
   --provider <name>
   --model <name>
   --reasoning-effort <none|minimal|low|medium|high|xhigh>
+  --skip-git-repo-check
   --output <path>
   --json
 `);

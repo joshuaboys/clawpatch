@@ -236,6 +236,9 @@ describe("workflow", () => {
     expect(parseArgs(["review", "--skip-git-repo-check"]).flags).toMatchObject({
       skipGitRepoCheck: true,
     });
+    expect(parseArgs(["ci", "--skip-git-repo-check"]).flags).toMatchObject({
+      skipGitRepoCheck: true,
+    });
     expect(parseArgs(["fix", "--finding", "f", "--dry-run"]).flags).toMatchObject({
       dryRun: true,
       finding: "f",
