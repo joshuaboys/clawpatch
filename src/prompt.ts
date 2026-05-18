@@ -353,8 +353,9 @@ async function fileBlockWithManifest(
     };
   }
   const bytes = Buffer.byteLength(contents, "utf8");
+  const truncated = contents.length > REVIEW_PROMPT_FILE_CHAR_LIMIT;
   const trimmed =
-    contents.length > REVIEW_PROMPT_FILE_CHAR_LIMIT
+    truncated
       ? `${contents.slice(0, REVIEW_PROMPT_FILE_CHAR_LIMIT)}\n...[truncated]`
       : contents;
   return {
@@ -364,7 +365,7 @@ async function fileBlockWithManifest(
       role,
       bytes,
       includedBytes: Buffer.byteLength(trimmed, "utf8"),
-      truncated: trimmed.length !== contents.length,
+      truncated,
       readable: true,
       skippedReason: null,
     },
