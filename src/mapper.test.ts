@@ -1755,11 +1755,23 @@ describe("mapFeatures", () => {
       "src/server.ts",
       [
         "// route imports",
+        "import { Router as OtherRouter } from 'other-router';",
+        "/* import { Router as CommentedOutRouter } from 'express'; */",
+        "/* import banner */ import { Router as BannerRouter } from 'express';",
+        "/*",
+        " * multiline import banner",
+        " */ import { Router as MultilineBannerRouter } from 'express';",
+        "import unused from 'unused'; /* stacked */ /* import banner */ import { Router as SemicolonBannerRouter } from 'express';",
         "import express, { Router, Router as ExpressRouter } from 'express';",
         "",
         "const app = express();",
+        "const otherRouter = OtherRouter();",
+        "const commentedOutRouter = CommentedOutRouter();",
         "const router = Router();",
         "const aliasRouter = ExpressRouter();",
+        "const bannerRouter = BannerRouter();",
+        "const multilineBannerRouter = MultilineBannerRouter();",
+        "const semicolonBannerRouter = SemicolonBannerRouter();",
         "const typedRouter: Router = Router();",
         "const projectRouter = Router({ mergeParams: true });",
         "let hitCount = 0;",
@@ -1770,8 +1782,13 @@ describe("mapFeatures", () => {
         "app.get('/anonymous', requireAuth, (_req, res) => res.send('ok'));",
         "app.get('/dynamic/' + version, dynamicRoute);",
         "app.all('/proxy', proxy);",
+        "otherRouter.get('/other-router', ignoredOtherRouter);",
+        "commentedOutRouter.get('/commented-out-router', ignoredCommentedOutRouter);",
         "router.post('/admin/jobs', createJob);",
         "aliasRouter.get('/aliased-router', listAliasedRouter);",
+        "bannerRouter.get('/banner-router', listBannerRouter);",
+        "multilineBannerRouter.get('/multiline-banner-router', listMultilineBannerRouter);",
+        "semicolonBannerRouter.get('/semicolon-banner-router', listSemicolonBannerRouter);",
         "router.post<{ Body: CreateJob }>('/typed-jobs', createTypedJob);",
         "typedRouter.patch('/typed/:id', updateTyped);",
         "router.route('/users').get(listUsers).delete(deleteUsers);",
@@ -1789,8 +1806,13 @@ describe("mapFeatures", () => {
         "function showAdmin() {}",
         "function dynamicRoute() {}",
         "function proxy() {}",
+        "function ignoredOtherRouter() {}",
+        "function ignoredCommentedOutRouter() {}",
         "function createJob() {}",
         "function listAliasedRouter() {}",
+        "function listBannerRouter() {}",
+        "function listMultilineBannerRouter() {}",
+        "function listSemicolonBannerRouter() {}",
         "function createTypedJob() {}",
         "function updateTyped() {}",
         "function listUsers() {}",
@@ -1964,6 +1986,9 @@ describe("mapFeatures", () => {
         "Express route ALL /proxy",
         "Express route POST /admin/jobs",
         "Express route GET /aliased-router",
+        "Express route GET /banner-router",
+        "Express route GET /multiline-banner-router",
+        "Express route GET /semicolon-banner-router",
         "Express route GET /cjs-aliased-router",
         "Express route GET /assigned-router",
         "Express route GET /typed-assigned-router",
@@ -1990,6 +2015,8 @@ describe("mapFeatures", () => {
     expect(titles).not.toContain("Express route GET /regex-health");
     expect(titles).not.toContain("Express route GET /arrow-regex");
     expect(titles).not.toContain("Express route GET /returned-regex");
+    expect(titles).not.toContain("Express route GET /other-router");
+    expect(titles).not.toContain("Express route GET /commented-out-router");
     expect(titles).not.toContain("Express route GET /custom-import-router");
     expect(titles).not.toContain("Express route GET /custom-router");
     expect(titles).not.toContain("Express route GET /custom-alias-router");
