@@ -77,6 +77,16 @@ describe("validateReviewOutput", () => {
         output("src/index.ts", { startLine: 1, endLine: 1, quote: "missing" }),
       ),
     ).rejects.toMatchObject({ code: "malformed-output" });
+
+    await expect(
+      validateReviewOutput(
+        root,
+        feature("src/index.ts"),
+        defaultConfig(),
+        manifest("src/index.ts"),
+        output("src/index.ts", { startLine: 2, endLine: 2, quote: null }),
+      ),
+    ).rejects.toMatchObject({ code: "malformed-output" });
   });
 
   it("rejects quotes that only match outside the cited line range", async () => {

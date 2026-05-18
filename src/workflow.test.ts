@@ -2861,6 +2861,84 @@ describe("workflow", () => {
     }
   });
 
+  it("switches to an existing patch branch when opening a PR", async () => {
+    const root = await fixtureRoot("clawpatch-open-pr-existing-branch-");
+    await writeFixture(
+      root,
+      "package.json",
+      JSON.stringify({ name: "open-pr-existing-branch", bin: { open: "src/index.ts" } }),
+    );
+    await writeFixture(root, "src/index.ts", "export const value = 'TODO_BUG';\n");
+    await initGit(root);
+    await checkCommand(root, "git add package.json src/index.ts");
+    await checkCommand(root, 'git -c commit.gpgsign=false commit -q -m "base"');
+    const origin = await fixtureRoot("clawpatch-open-pr-existing-branch-origin-");
+    await checkCommand(root, `git init --bare -q ${origin}`);
+    await checkCommand(root, `git remote add origin ${origin}`);
+    const context = await makeContext(testOptions(root));
+    const paths = statePaths(join(root, ".clawpatch"));
+    await initCommand(context, {});
+    await checkCommand(root, "git branch clawpatch/pat_open_pr_existing_branch");
+    await writeFixture(root, "src/index.ts", "export const value = 'fixed';\n");
+    const now = new Date().toISOString();
+    await writePatchAttempt(paths, {
+      schemaVersion: 1,
+      patchAttemptId: "pat_open_pr_existing_branch",
+      findingIds: [],
+      featureIds: [],
+      status: "applied",
+      plan: "Replace the marker value.",
+      filesChanged: ["src/index.ts"],
+      commandsRun: [],
+      testResults: [
+        {
+          command: "pnpm test",
+          cwd: root,
+          exitCode: 0,
+          durationMs: 1,
+          stdout: "",
+          stderr: "",
+        },
+      ],
+      provider: null,
+      git: {
+        baseSha: (await runCommand("git rev-parse HEAD", root)).stdout.trim(),
+        commitSha: null,
+        branchName: "clawpatch/pat_open_pr_existing_branch",
+        prUrl: null,
+      },
+      createdAt: now,
+      updatedAt: now,
+    });
+    const ghScripts = await fixtureRoot("clawpatch-open-pr-existing-branch-gh-");
+    const successGh = join(ghScripts, "success-gh.sh");
+    await writeFixture(
+      ghScripts,
+      "success-gh.sh",
+      "#!/bin/sh\necho https://github.com/openclaw/clawpatch/pull/1002\n",
+    );
+    await chmod(successGh, 0o755);
+    const previousGh = process.env["CLAWPATCH_GH"];
+    try {
+      process.env["CLAWPATCH_GH"] = successGh;
+      const opened = (await openPrCommand(context, {
+        patch: "pat_open_pr_existing_branch",
+        base: "main",
+      })) as { branch: string; pr: string };
+      const currentBranch = (await runCommand("git branch --show-current", root)).stdout.trim();
+
+      expect(opened.pr).toBe("https://github.com/openclaw/clawpatch/pull/1002");
+      expect(opened.branch).toBe("clawpatch/pat_open_pr_existing_branch");
+      expect(currentBranch).toBe("clawpatch/pat_open_pr_existing_branch");
+    } finally {
+      if (previousGh === undefined) {
+        delete process.env["CLAWPATCH_GH"];
+      } else {
+        process.env["CLAWPATCH_GH"] = previousGh;
+      }
+    }
+  });
+
   it("opens PRs for quoted paths without committing pre-staged state", async () => {
     const root = await fixtureRoot("clawpatch-open-pr-pathspec-");
     await writeFixture(

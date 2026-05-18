@@ -101,12 +101,20 @@ function assertLineRange(
   if (startLine > endLine) {
     throwMalformed(`evidence line range is inverted: ${evidence.path}:${startLine}-${endLine}`);
   }
-  const lineCount = contents.length === 0 ? 1 : contents.split("\n").length;
+  const lineCount = reviewLineCount(contents);
   if (endLine > lineCount) {
     throwMalformed(
       `evidence line range exceeds file length: ${evidence.path}:${startLine}-${endLine}`,
     );
   }
+}
+
+function reviewLineCount(contents: string): number {
+  if (contents.length === 0) {
+    return 1;
+  }
+  const lines = contents.split("\n").length;
+  return contents.endsWith("\n") ? lines - 1 : lines;
 }
 
 function assertQuote(

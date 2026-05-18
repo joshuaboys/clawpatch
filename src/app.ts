@@ -961,7 +961,10 @@ export async function openPrCommand(
   let commitSha = patch.git.commitSha;
   if (commitSha === null) {
     if (git.currentBranch !== branch) {
-      await checkedRun("git switch", runCommandArgs("git", ["switch", "-c", branch], git.root));
+      const switchArgs = (await localBranchExists(git.root, branch))
+        ? ["switch", branch]
+        : ["switch", "-c", branch];
+      await checkedRun("git switch", runCommandArgs("git", switchArgs, git.root));
     }
     const stagedOnlyFiles = new Set(patchWorktree.stagedOnlyFiles);
     const stageableFiles = commitFiles.filter((file) => !stagedOnlyFiles.has(file));
@@ -1480,6 +1483,15 @@ async function checkedRun(label: string, resultPromise: Promise<CommandResult>):
 
 function githubCli(): string {
   return process.env["CLAWPATCH_GH"] ?? "gh";
+}
+
+async function localBranchExists(gitRoot: string, branch: string): Promise<boolean> {
+  const result = await runCommandArgs(
+    "git",
+    ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
+    gitRoot,
+  );
+  return result.exitCode === 0;
 }
 
 function firstUrl(output: string): string | null {
