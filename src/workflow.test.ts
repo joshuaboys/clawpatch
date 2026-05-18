@@ -2899,6 +2899,136 @@ describe("workflow", () => {
     });
   });
 
+  it("opens PRs for newly created dangling symlinks", async () => {
+    const root = await fixtureRoot("clawpatch-open-pr-symlink-");
+    await writeFixture(root, "package.json", JSON.stringify({ name: "open-pr-symlink" }));
+    await initGit(root);
+    await checkCommand(root, "git add package.json");
+    await checkCommand(root, 'git -c commit.gpgsign=false commit -q -m "base"');
+    const origin = await fixtureRoot("clawpatch-open-pr-symlink-origin-");
+    await checkCommand(root, `git init --bare -q ${origin}`);
+    await checkCommand(root, `git remote add origin ${origin}`);
+    const context = await makeContext(testOptions(root));
+    const paths = statePaths(join(root, ".clawpatch"));
+    await initCommand(context, {});
+    await symlink("missing-target", join(root, "link"));
+    const now = new Date().toISOString();
+    await writePatchAttempt(paths, {
+      schemaVersion: 1,
+      patchAttemptId: "pat_open_pr_symlink",
+      findingIds: [],
+      featureIds: [],
+      status: "applied",
+      plan: "Add the symlink.",
+      filesChanged: ["link"],
+      commandsRun: [],
+      testResults: [
+        {
+          command: "pnpm test",
+          cwd: root,
+          exitCode: 0,
+          durationMs: 1,
+          stdout: "",
+          stderr: "",
+        },
+      ],
+      provider: null,
+      git: {
+        baseSha: (await runCommand("git rev-parse HEAD", root)).stdout.trim(),
+        commitSha: null,
+        branchName: null,
+        prUrl: null,
+      },
+      createdAt: now,
+      updatedAt: now,
+    });
+    const ghScripts = await fixtureRoot("clawpatch-open-pr-symlink-gh-");
+    const successGh = join(ghScripts, "success-gh.sh");
+    await writeFixture(
+      ghScripts,
+      "success-gh.sh",
+      "#!/bin/sh\necho https://github.com/openclaw/clawpatch/pull/1003\n",
+    );
+    await chmod(successGh, 0o755);
+    const previousGh = process.env["CLAWPATCH_GH"];
+    try {
+      process.env["CLAWPATCH_GH"] = successGh;
+      const opened = (await openPrCommand(context, {
+        patch: "pat_open_pr_symlink",
+        base: "main",
+        branch: "clawpatch/pat_open_pr_symlink",
+      })) as { commit: string; pr: string };
+      const committed = await runCommand(`git show --name-status --format= ${opened.commit}`, root);
+
+      expect(opened.pr).toBe("https://github.com/openclaw/clawpatch/pull/1003");
+      expect(committed.stdout.trim()).toBe("A\tlink");
+    } finally {
+      if (previousGh === undefined) {
+        delete process.env["CLAWPATCH_GH"];
+      } else {
+        process.env["CLAWPATCH_GH"] = previousGh;
+      }
+    }
+  });
+
+  it("returns an existing PR URL without recreating it", async () => {
+    const root = await fixtureRoot("clawpatch-open-pr-existing-url-");
+    await writeFixture(root, "package.json", JSON.stringify({ name: "open-pr-existing-url" }));
+    await writeFixture(root, "src/index.ts", "export const value = 'fixed';\n");
+    await initGit(root);
+    await checkCommand(root, "git add package.json src/index.ts");
+    await checkCommand(root, 'git -c commit.gpgsign=false commit -q -m "base"');
+    const commitSha = (await runCommand("git rev-parse HEAD", root)).stdout.trim();
+    const context = await makeContext(testOptions(root));
+    const paths = statePaths(join(root, ".clawpatch"));
+    await initCommand(context, {});
+    const now = new Date().toISOString();
+    await writePatchAttempt(paths, {
+      schemaVersion: 1,
+      patchAttemptId: "pat_open_pr_existing_url",
+      findingIds: [],
+      featureIds: [],
+      status: "validated",
+      plan: "Already opened.",
+      filesChanged: ["src/index.ts"],
+      commandsRun: [],
+      testResults: [],
+      provider: null,
+      git: {
+        baseSha: commitSha,
+        commitSha,
+        branchName: "clawpatch/pat_open_pr_existing_url",
+        prUrl: "https://github.com/openclaw/clawpatch/pull/1004",
+      },
+      createdAt: now,
+      updatedAt: now,
+    });
+    const ghScripts = await fixtureRoot("clawpatch-open-pr-existing-url-gh-");
+    const failingGh = join(ghScripts, "fail-gh.sh");
+    await writeFixture(ghScripts, "fail-gh.sh", "#!/bin/sh\nexit 42\n");
+    await chmod(failingGh, 0o755);
+    const previousGh = process.env["CLAWPATCH_GH"];
+    try {
+      process.env["CLAWPATCH_GH"] = failingGh;
+      await expect(
+        openPrCommand(context, {
+          patch: "pat_open_pr_existing_url",
+          base: "main",
+        }),
+      ).resolves.toMatchObject({
+        pr: "https://github.com/openclaw/clawpatch/pull/1004",
+        branch: "clawpatch/pat_open_pr_existing_url",
+        commit: commitSha,
+      });
+    } finally {
+      if (previousGh === undefined) {
+        delete process.env["CLAWPATCH_GH"];
+      } else {
+        process.env["CLAWPATCH_GH"] = previousGh;
+      }
+    }
+  });
+
   it("persists the patch commit before failing external PR creation", async () => {
     const root = await fixtureRoot("clawpatch-open-pr-retry-");
     await writeFixture(

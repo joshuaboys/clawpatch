@@ -1,4 +1,4 @@
-import { appendFile, stat, writeFile } from "node:fs/promises";
+import { appendFile, lstat, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { hostname } from "node:os";
 import {
@@ -932,6 +932,21 @@ export async function openPrCommand(
   }
   const base = stringFlag(flags, "base") ?? git.defaultBranch;
   const branch = prBranchName(patch, stringFlag(flags, "branch"), git.currentBranch, base);
+  if (
+    flags["dryRun"] !== true &&
+    patch.git.prUrl !== null &&
+    patch.git.commitSha !== null &&
+    patch.git.branchName !== null
+  ) {
+    return {
+      patchAttempt: patch.patchAttemptId,
+      branch: patch.git.branchName,
+      base,
+      commit: patch.git.commitSha,
+      pr: patch.git.prUrl,
+      next: patch.git.prUrl,
+    };
+  }
   const findings = await readFindings(loaded.paths);
   const linkedFindings = findings.filter((finding) => patch.findingIds.includes(finding.findingId));
   const title = prTitle(stringFlag(flags, "title"), linkedFindings, patch);
@@ -1513,7 +1528,7 @@ function uniqueStrings(values: string[]): string[] {
 async function existingGitFiles(root: string, files: string[]): Promise<string[]> {
   const existing = await Promise.all(
     files.map(async (file) =>
-      (await stat(resolve(root, file)).catch(() => null)) === null ? null : file,
+      (await lstat(resolve(root, file)).catch(() => null)) === null ? null : file,
     ),
   );
   return existing.filter((file): file is string => file !== null);
