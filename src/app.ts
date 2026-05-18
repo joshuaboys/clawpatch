@@ -937,7 +937,8 @@ export async function openPrCommand(
   const title = prTitle(stringFlag(flags, "title"), linkedFindings, patch);
   const body = renderPatchPrBody(patch, linkedFindings);
   const gitFiles = gitRelativePatchFiles(git.root, loaded.root, patch.filesChanged);
-  const commands = plannedPrCommands(patch, branch, base, title);
+  const draft = flags["draft"] === true;
+  const commands = plannedPrCommands(patch, branch, base, title, gitFiles, draft);
   if (flags["dryRun"] === true) {
     return {
       dryRun: true,
@@ -995,22 +996,7 @@ export async function openPrCommand(
     });
   }
   await checkedRun("git push", runCommandArgs("git", ["push", "-u", "origin", branch], git.root));
-  const ghArgs = [
-    "pr",
-    "create",
-    "--head",
-    branch,
-    "--title",
-    title,
-    "--body-file",
-    "-",
-  ];
-  if (base !== null) {
-    ghArgs.splice(2, 0, "--base", base);
-  }
-  if (flags["draft"] === true) {
-    ghArgs.push("--draft");
-  }
+  const ghArgs = prCreateArgs(base, branch, title, draft);
   const gh = await checkedRun("gh pr create", runCommandArgs(githubCli(), ghArgs, git.root, body));
   const prUrl = firstUrl(gh.stdout) ?? gh.stdout.trim();
   await writePatchPrGitState(loaded.paths, patch, { commitSha, branchName: branch, prUrl });
@@ -1316,14 +1302,8 @@ function renderPatchPrBody(patch: PatchAttempt, findings: FindingRecord[]): stri
 }
 
 function gitRelativePatchFiles(gitRoot: string, projectRoot: string, files: string[]): string[] {
-  const projectPrefix = normalizePath(relative(gitRoot, projectRoot));
-  const scopedPrefix =
-    projectPrefix.length > 0 &&
-    projectPrefix !== "." &&
-    !projectPrefix.startsWith("../") &&
-    projectPrefix !== ".."
-      ? projectPrefix
-      : "";
+  const projectPrefix = gitRelativePathPrefix(gitRoot, projectRoot);
+  const scopedPrefix = isUsableRelativePrefix(projectPrefix) ? projectPrefix : "";
   return files.map((file) => {
     const relativeFile = normalizePath(file);
     if (
@@ -1344,17 +1324,34 @@ function plannedPrCommands(
   branch: string,
   base: string | null,
   title: string,
+  gitFiles: string[],
+  draft: boolean,
 ): string[] {
   const commands: string[] = [];
   if (patch.git.commitSha === null) {
-    commands.push(`git switch -c ${branch}`);
-    commands.push(`git add -- ${patch.filesChanged.join(" ")}`);
-    commands.push(`git commit -m ${title}`);
+    commands.push(`git switch -c ${shellArg(branch)}`);
+    commands.push(`git add -- ${gitFiles.map(shellArg).join(" ")}`);
+    commands.push(`git commit -m ${shellArg(title)} -- ${gitFiles.map(shellArg).join(" ")}`);
   }
-  commands.push(`git push -u origin ${branch}`);
-  const baseArg = base === null ? "" : `--base ${base} `;
-  commands.push(`gh pr create ${baseArg}--head ${branch} --title ${title} --body-file -`);
+  commands.push(`git push -u origin ${shellArg(branch)}`);
+  commands.push(`gh ${prCreateArgs(base, branch, title, draft).map(shellArg).join(" ")}`);
   return commands;
+}
+
+function prCreateArgs(
+  base: string | null,
+  branch: string,
+  title: string,
+  draft: boolean,
+): string[] {
+  const args = ["pr", "create", "--head", branch, "--title", title, "--body-file", "-"];
+  if (base !== null) {
+    args.splice(2, 0, "--base", base);
+  }
+  if (draft) {
+    args.push("--draft");
+  }
+  return args;
 }
 
 async function assertPatchWorktree(
@@ -1499,6 +1496,10 @@ async function localBranchExists(gitRoot: string, branch: string): Promise<boole
 
 function firstUrl(output: string): string | null {
   return /https?:\/\/\S+/u.exec(output)?.[0] ?? null;
+}
+
+function shellArg(value: string): string {
+  return /^[A-Za-z0-9_./:@%+=,-]+$/u.test(value) ? value : `'${value.replace(/'/gu, "'\\''")}'`;
 }
 
 function normalizePath(path: string): string {

@@ -2833,6 +2833,72 @@ describe("workflow", () => {
     });
   });
 
+  it("previews PR commands with execution paths and draft flags", async () => {
+    const root = await fixtureRoot("clawpatch-open-pr-subdir-");
+    const projectRoot = join(root, "packages/app");
+    await writeFixture(
+      root,
+      "packages/app/package.json",
+      JSON.stringify({ name: "open-pr-subdir", bin: { open: "src/index.ts" } }),
+    );
+    await writeFixture(root, "packages/app/src/index.ts", "export const value = 'TODO_BUG';\n");
+    await initGit(root);
+    await checkCommand(root, "git add packages");
+    await checkCommand(root, 'git -c commit.gpgsign=false commit -q -m "base"');
+    const context = await makeContext(testOptions(projectRoot));
+    const paths = statePaths(join(projectRoot, ".clawpatch"));
+    await initCommand(context, {});
+    await writeFixture(root, "packages/app/src/index.ts", "export const value = 'fixed';\n");
+    const now = new Date().toISOString();
+    await writePatchAttempt(paths, {
+      schemaVersion: 1,
+      patchAttemptId: "pat_open_pr_subdir",
+      findingIds: [],
+      featureIds: [],
+      status: "applied",
+      plan: "Replace the marker value.",
+      filesChanged: ["src/index.ts"],
+      commandsRun: [],
+      testResults: [
+        {
+          command: "pnpm test",
+          cwd: projectRoot,
+          exitCode: 0,
+          durationMs: 1,
+          stdout: "",
+          stderr: "",
+        },
+      ],
+      provider: null,
+      git: {
+        baseSha: (await runCommand("git rev-parse HEAD", root)).stdout.trim(),
+        commitSha: null,
+        branchName: null,
+        prUrl: null,
+      },
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const preview = await openPrCommand(context, {
+      patch: "pat_open_pr_subdir",
+      base: "develop",
+      branch: "clawpatch/pat_open_pr_subdir",
+      draft: true,
+      dryRun: true,
+    });
+
+    expect(preview).toMatchObject({
+      commands: expect.arrayContaining([
+        expect.stringContaining("git add -- packages/app/src/index.ts"),
+        expect.stringContaining(
+          "gh pr create --base develop --head clawpatch/pat_open_pr_subdir",
+        ),
+        expect.stringContaining("--draft"),
+      ]),
+    });
+  });
+
   it("persists the patch commit before failing external PR creation", async () => {
     const root = await fixtureRoot("clawpatch-open-pr-retry-");
     await writeFixture(
