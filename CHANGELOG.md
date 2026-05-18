@@ -11,6 +11,7 @@
 - Added `clawpatch review --prompt-file` to append extra reviewer guidance from a file or stdin, thanks @dpdanpittman.
 - Added deterministic Express, Fastify, and Hono route mapping for Node projects, thanks @rohitjavvadi.
 - Fixed Express route mapping to recognize aliased Router factories from imports, CommonJS destructuring, and direct assignments, thanks @rohitjavvadi.
+- Fixed docs search matching, empty-state display, and mobile sidebar navigation, thanks @cloudsolutiongmbh.
 - Fixed `clawpatch review --since` to review all touched features by default instead of silently applying the normal single-feature limit.
 - Improved Codex provider failures for missing Responses API write scope with direct credential and scope guidance.
 - Added conservative Django `urls.py` route mapping for `path`, `re_path`, and legacy `url` declarations, thanks @rohitjavvadi.

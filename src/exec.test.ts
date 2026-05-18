@@ -82,8 +82,8 @@ describe("runCommandArgs", () => {
         childScript,
         [
           "import { writeFileSync } from 'node:fs';",
-          `writeFileSync(${JSON.stringify(ready)}, 'ready');`,
           "process.on('SIGTERM', () => {});",
+          "process.send?.('ready');",
           `setTimeout(() => writeFileSync(${JSON.stringify(marker)}, 'alive'), 1000);`,
           "setInterval(() => {}, 1000);",
         ].join("\n"),
@@ -92,14 +92,12 @@ describe("runCommandArgs", () => {
       await writeFile(
         parentScript,
         [
-          "import { existsSync } from 'node:fs';",
+          "import { writeFileSync } from 'node:fs';",
           "import { spawn } from 'node:child_process';",
-          `spawn(process.execPath, [${JSON.stringify(childScript)}], { stdio: ['ignore', 'inherit', 'inherit'] });`,
-          "const started = Date.now();",
-          `const ready = ${JSON.stringify(ready)};`,
-          "const timer = setInterval(() => {",
-          "  if (existsSync(ready) || Date.now() - started > 1000) clearInterval(timer);",
-          "}, 10);",
+          `const child = spawn(process.execPath, [${JSON.stringify(childScript)}], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });`,
+          "child.on('error', () => {});",
+          `child.on('message', (message) => { if (message === 'ready') writeFileSync(${JSON.stringify(ready)}, 'ready'); });`,
+          "setInterval(() => {}, 1000);",
         ].join("\n"),
         "utf8",
       );
