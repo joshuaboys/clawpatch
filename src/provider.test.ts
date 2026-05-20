@@ -14,9 +14,12 @@ const {
   codexFailureMessage,
   extractAcpxJson,
   extractOpencodeJson,
+  formatZodError,
+  formatZodIssue,
   parseAcpxJsonOutput,
   parseAcpxAgent,
   parseCodexJson,
+  parseOrThrow,
   piThinkingLevel,
   providerJsonSchema,
 } = __testing;
@@ -614,6 +617,119 @@ describe("extractOpencodeJson", () => {
       return;
     }
     throw new Error("expected provider auth failure");
+  });
+});
+
+function makeBadReview(overrides: Record<string, unknown> = {}): unknown {
+  return {
+    findings: [
+      {
+        title: "x",
+        category: "quality",
+        severity: "medium",
+        confidence: "high",
+        evidence: [],
+        reasoning: "r",
+        reproduction: null,
+        recommendation: "rec",
+        whyTestsDoNotAlreadyCoverThis: "w",
+        suggestedRegressionTest: null,
+        minimumFixScope: "m",
+        ...overrides,
+      },
+    ],
+    inspected: { files: [], symbols: [], notes: [] },
+  };
+}
+
+describe("formatZodError", () => {
+  it("reports invalid enum compactly with bad value and expected list", () => {
+    const input = makeBadReview();
+    const result = reviewOutputSchema.safeParse(input);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const msg = formatZodError(result.error, input);
+    expect(msg).toMatch(/findings\[0\]\.category="quality"/u);
+    expect(msg).toMatch(/invalid_value/u);
+    expect(msg).toMatch(/expected one of [^()]*\bbug\b/u);
+    expect(msg.split("\n")).toHaveLength(1);
+  });
+
+  it("reports missing required field compactly", () => {
+    const bad = {
+      findings: [
+        {
+          title: "x",
+          category: "bug",
+          severity: "medium",
+          confidence: "high",
+          evidence: [],
+          reproduction: null,
+          recommendation: "rec",
+          whyTestsDoNotAlreadyCoverThis: "w",
+          suggestedRegressionTest: null,
+          minimumFixScope: "m",
+          // reasoning omitted on purpose
+        },
+      ],
+      inspected: { files: [], symbols: [], notes: [] },
+    };
+    const result = reviewOutputSchema.safeParse(bad);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const msg = formatZodError(result.error, bad);
+    expect(msg).toMatch(/findings\[0\]\.reasoning/u);
+    expect(msg).toMatch(/invalid_type/u);
+    expect(msg).toMatch(/expected string/u);
+  });
+
+  it("truncates long received string values to a bounded preview", () => {
+    const longValue = "a".repeat(500);
+    const issue = formatZodIssue({
+      code: "invalid_type",
+      path: ["findings", 0, "reasoning"],
+      message: "x",
+      expected: "string",
+      received: longValue,
+    } as unknown as Parameters<typeof formatZodIssue>[0]);
+    expect(issue.length).toBeLessThan(longValue.length);
+    expect(issue).toMatch(/findings\[0\]\.reasoning=/u);
+  });
+
+  it("includes a +N more suffix when zod reports many issues", () => {
+    const fakeError = {
+      issues: Array.from({ length: 5 }, (_, i) => ({
+        code: "invalid_type",
+        path: ["x", i],
+        message: "x",
+        expected: "string",
+        received: "n",
+      })),
+    } as unknown as Parameters<typeof formatZodError>[0];
+    const msg = formatZodError(fakeError);
+    expect(msg).toMatch(/\(\+2 more\)$/u);
+  });
+});
+
+describe("parseOrThrow", () => {
+  it("returns parsed data on success", () => {
+    const ok = {
+      findings: [],
+      inspected: { files: [], symbols: [], notes: [] },
+    };
+    expect(parseOrThrow(reviewOutputSchema, ok, "test")).toEqual(ok);
+  });
+
+  it("throws ClawpatchError with malformed-output / exit 8 on bad input", () => {
+    expectMalformed(
+      () =>
+        parseOrThrow(
+          reviewOutputSchema,
+          { findings: [{ category: "quality" }], inspected: {} },
+          "test-label",
+        ),
+      /test-label: schema validation failed: findings\[0\]/u,
+    );
   });
 });
 
