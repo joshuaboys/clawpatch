@@ -206,23 +206,21 @@ export type FeatureRecord = z.infer<typeof featureRecordSchema>;
 export type FeatureKind = FeatureRecord["kind"];
 export type TrustBoundary = FeatureRecord["trustBoundaries"][number];
 
-export const evidenceRefSchema = z.object({
-  path: z.string(),
-  startLine: z
-    .number()
-    .int()
-    .min(0)
-    .nullable()
-    .transform((v) => (v === 0 ? null : v)),
-  endLine: z
-    .number()
-    .int()
-    .min(0)
-    .nullable()
-    .transform((v) => (v === 0 ? null : v)),
-  symbol: z.string().nullable(),
-  quote: z.string().nullable(),
-});
+const evidenceLineSchema = z.number().int().min(0).nullable();
+
+export const evidenceRefSchema = z
+  .object({
+    path: z.string(),
+    startLine: evidenceLineSchema,
+    endLine: evidenceLineSchema,
+    symbol: z.string().nullable(),
+    quote: z.string().nullable(),
+  })
+  .transform((evidence) =>
+    evidence.startLine === 0 || evidence.endLine === 0
+      ? { ...evidence, startLine: null, endLine: null }
+      : evidence,
+  );
 
 export const findingHistoryEntrySchema = z.object({
   runId: z.string().nullable(),

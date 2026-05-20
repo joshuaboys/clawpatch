@@ -40,5 +40,13 @@ function stripProviderUnsupportedSchemaKeywords(value: unknown): unknown {
     }
     output[key] = stripProviderUnsupportedSchemaKeywords(item);
   }
+  if (output["type"] === "object" && isRecord(output["properties"])) {
+    output["additionalProperties"] = false;
+    output["required"] = Object.keys(output["properties"]);
+  }
   return output;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

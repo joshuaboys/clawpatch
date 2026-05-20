@@ -260,6 +260,20 @@ describe("providerJsonSchema", () => {
       expect(enumNodes.every((node) => node["type"] === "string")).toBe(true);
     }
   });
+
+  it("keeps object schemas strict even when parser input fields are optional", () => {
+    const schema = providerJsonSchema(reviewOutputSchema) as Record<string, unknown>;
+    const findings = propertySchema(schema, "findings");
+    const finding = itemSchema(findings);
+    const inspected = propertySchema(schema, "inspected");
+
+    for (const objectSchema of [schema, finding, inspected]) {
+      expect(objectSchema["additionalProperties"]).toBe(false);
+      expect(objectSchema["required"]).toEqual(Object.keys(propertiesOf(objectSchema)));
+    }
+    expect(finding["required"]).toContain("reproduction");
+    expect(finding["required"]).toContain("minimumFixScope");
+  });
 });
 
 describe("piThinkingLevel", () => {
@@ -292,6 +306,30 @@ function enumSchemaNodes(value: unknown): Array<Record<string, unknown>> {
   const node = value as Record<string, unknown>;
   const nested = Object.values(node).flatMap(enumSchemaNodes);
   return Array.isArray(node["enum"]) ? [node, ...nested] : nested;
+}
+
+function propertySchema(schema: Record<string, unknown>, name: string): Record<string, unknown> {
+  const value = propertiesOf(schema)[name];
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`missing schema property: ${name}`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function itemSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  const value = schema["items"];
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("missing item schema");
+  }
+  return value as Record<string, unknown>;
+}
+
+function propertiesOf(schema: Record<string, unknown>): Record<string, unknown> {
+  const value = schema["properties"];
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("missing schema properties");
+  }
+  return value as Record<string, unknown>;
 }
 
 describe("codexFailureMessage", () => {
@@ -805,7 +843,7 @@ describe("evidenceRefSchema tolerance", () => {
       quote: null,
     });
     expect(parsed.startLine).toBeNull();
-    expect(parsed.endLine).toBe(5);
+    expect(parsed.endLine).toBeNull();
   });
 
   it("accepts endLine 0 and normalizes to null", () => {
@@ -816,7 +854,7 @@ describe("evidenceRefSchema tolerance", () => {
       symbol: null,
       quote: null,
     });
-    expect(parsed.startLine).toBe(5);
+    expect(parsed.startLine).toBeNull();
     expect(parsed.endLine).toBeNull();
   });
 });
