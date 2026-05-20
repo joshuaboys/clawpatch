@@ -357,33 +357,39 @@ export const agentMapOutputSchema = z.object({
 
 export type AgentMapOutput = z.infer<typeof agentMapOutputSchema>;
 
+export const reviewFindingSchema = z.object({
+  title: z.string(),
+  category: z.enum(findingCategories),
+  severity: z.enum(["critical", "high", "medium", "low"]),
+  confidence: z.enum(["high", "medium", "low"]),
+  evidence: z.array(evidenceRefSchema),
+  reasoning: z.string(),
+  reproduction: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? null),
+  recommendation: z.string(),
+  whyTestsDoNotAlreadyCoverThis: z.string(),
+  suggestedRegressionTest: z.string().nullable(),
+  minimumFixScope: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? ""),
+});
+
+export type ReviewFinding = z.infer<typeof reviewFindingSchema>;
+
+export const reviewInspectedSchema = z.object({
+  files: z.array(z.string()),
+  symbols: z.array(z.string()),
+  notes: z.array(z.string()),
+});
+
+export type ReviewInspected = z.infer<typeof reviewInspectedSchema>;
+
 export const reviewOutputSchema = z.object({
-  findings: z.array(
-    z.object({
-      title: z.string(),
-      category: z.enum(findingCategories),
-      severity: z.enum(["critical", "high", "medium", "low"]),
-      confidence: z.enum(["high", "medium", "low"]),
-      evidence: z.array(evidenceRefSchema),
-      reasoning: z.string(),
-      reproduction: z
-        .string()
-        .nullish()
-        .transform((v) => v ?? null),
-      recommendation: z.string(),
-      whyTestsDoNotAlreadyCoverThis: z.string(),
-      suggestedRegressionTest: z.string().nullable(),
-      minimumFixScope: z
-        .string()
-        .nullish()
-        .transform((v) => v ?? ""),
-    }),
-  ),
-  inspected: z.object({
-    files: z.array(z.string()),
-    symbols: z.array(z.string()),
-    notes: z.array(z.string()),
-  }),
+  findings: z.array(reviewFindingSchema),
+  inspected: reviewInspectedSchema,
 });
 
 export type ReviewOutput = z.infer<typeof reviewOutputSchema>;

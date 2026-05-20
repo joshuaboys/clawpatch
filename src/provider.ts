@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ZodError, ZodIssue, ZodType } from "zod";
+import { z, type ZodError, type ZodIssue, type ZodType } from "zod";
 import { runCommandArgs } from "./exec.js";
 import { ClawpatchError } from "./errors.js";
 import {
@@ -15,10 +15,12 @@ import { extractJson, parseCodexJson, safeProviderPreview } from "./provider-jso
 import {
   AgentMapOutput,
   FixPlanOutput,
-  ReviewOutput,
+  ReviewFinding,
   RevalidateOutput,
   agentMapOutputSchema,
   fixPlanOutputSchema,
+  reviewFindingSchema,
+  reviewInspectedSchema,
   reviewOutputSchema,
   revalidateOutputSchema,
   type ReasoningEffort,
@@ -149,11 +151,109 @@ export type ProviderOptions = {
   reasoningEffort: ReasoningEffort | null;
   skipGitRepoCheck: boolean;
 };
+
+/**
+ * One review finding rejected by per-finding validation. `layer` records
+ * which gate dropped it: `schema` is the per-finding `reviewFindingSchema`
+ * Zod parse, `validation` is the evidence/quote/line-range check in
+ * `validateReviewOutputPartitioned`. Operators can use `layer` to tell
+ * "the model emitted nonsense for this finding" (schema) apart from
+ * "the model cited a real-looking finding but pointed at the wrong file
+ * or quoted text that isn't there" (validation).
+ */
+export type DroppedFinding = {
+  path: (string | number)[];
+  message: string;
+  sample: string;
+  layer?: "schema" | "validation";
+};
+
+export type PartitionedReviewOutput = {
+  findings: ReviewFinding[];
+  inspected: z.infer<typeof reviewInspectedSchema>;
+  droppedFindings: DroppedFinding[];
+};
+
+const reviewContainerSchema = z.object({
+  findings: z.array(z.unknown()),
+  inspected: reviewInspectedSchema,
+});
+
+function truncateSample(value: unknown): string {
+  let text: string;
+  try {
+    text = JSON.stringify(value);
+  } catch {
+    text = String(value);
+  }
+  if (text === undefined) {
+    text = String(value);
+  }
+  return text.length > 200 ? `${text.slice(0, 197)}...` : text;
+}
+
+export function parseReviewOutput(output: unknown): PartitionedReviewOutput {
+  // Fast path: whole-document parse on success.
+  const whole = reviewOutputSchema.safeParse(output);
+  if (whole.success) {
+    return {
+      findings: whole.data.findings,
+      inspected: whole.data.inspected,
+      droppedFindings: [],
+    };
+  }
+
+  // Fallback: validate container shape, partition findings element-by-element.
+  const container = reviewContainerSchema.safeParse(output);
+  if (!container.success) {
+    // Container shape is fundamentally wrong (e.g. findings is not an array, or
+    // inspected is missing). Preserve today's throw contract via ClawpatchError
+    // so callers see a single clear malformed-output failure.
+    const issue = container.error.issues[0];
+    const where =
+      issue?.path
+        .map((segment) => (typeof segment === "symbol" ? segment.toString() : segment))
+        .join(".") ?? "<root>";
+    const detail = issue?.message ?? "invalid review output shape";
+    throw new ClawpatchError(
+      `provider review output is malformed at ${where}: ${detail}`,
+      8,
+      "malformed-output",
+    );
+  }
+
+  const validFindings: ReviewFinding[] = [];
+  const droppedFindings: DroppedFinding[] = [];
+  container.data.findings.forEach((candidate, idx) => {
+    const result = reviewFindingSchema.safeParse(candidate);
+    if (result.success) {
+      validFindings.push(result.data);
+      return;
+    }
+    const issue = result.error.issues[0];
+    const issuePath = (issue?.path ?? []).map((segment) =>
+      typeof segment === "symbol" ? segment.toString() : segment,
+    );
+    droppedFindings.push({
+      path: ["findings", idx, ...issuePath],
+      message: issue?.message ?? "invalid finding shape",
+      sample: truncateSample(candidate),
+      layer: "schema",
+    });
+  });
+
+  return {
+    findings: validFindings,
+    inspected: container.data.inspected,
+    droppedFindings,
+  };
+}
+
 export type Provider = {
   name: string;
   check(root: string): Promise<string>;
   map(root: string, prompt: string, options: ProviderOptions): Promise<AgentMapOutput>;
-  review(root: string, prompt: string, options: ProviderOptions): Promise<ReviewOutput>;
+  review(root: string, prompt: string, options: ProviderOptions): Promise<PartitionedReviewOutput>;
   fix(root: string, prompt: string, options: ProviderOptions): Promise<FixPlanOutput>;
   revalidate(root: string, prompt: string, options: ProviderOptions): Promise<RevalidateOutput>;
 };
@@ -196,9 +296,13 @@ const codexProvider: Provider = {
     const output = await runCodexJson(root, prompt, options, agentMapJsonSchema);
     return parseOrThrow(agentMapOutputSchema, output, "codex agent-map");
   },
-  async review(root: string, prompt: string, options: ProviderOptions): Promise<ReviewOutput> {
+  async review(
+    root: string,
+    prompt: string,
+    options: ProviderOptions,
+  ): Promise<PartitionedReviewOutput> {
     const output = await runCodexJson(root, prompt, options, reviewJsonSchema);
-    return parseOrThrow(reviewOutputSchema, output, "codex review");
+    return parseReviewOutput(output);
   },
   async fix(root: string, prompt: string, options: ProviderOptions): Promise<FixPlanOutput> {
     const output = await runCodexJson(root, prompt, options, fixPlanJsonSchema, "workspace-write");
@@ -227,9 +331,13 @@ const opencodeProvider: Provider = {
     const output = await runOpencodeJson(root, prompt, options.model, agentMapJsonSchema, true);
     return parseOrThrow(agentMapOutputSchema, output, "opencode agent-map");
   },
-  async review(root: string, prompt: string, options: ProviderOptions): Promise<ReviewOutput> {
+  async review(
+    root: string,
+    prompt: string,
+    options: ProviderOptions,
+  ): Promise<PartitionedReviewOutput> {
     const output = await runOpencodeJson(root, prompt, options.model, reviewJsonSchema, true);
-    return parseOrThrow(reviewOutputSchema, output, "opencode review");
+    return parseReviewOutput(output);
   },
   async fix(root: string, prompt: string, options: ProviderOptions): Promise<FixPlanOutput> {
     const output = await runOpencodeJson(root, prompt, options.model, fixPlanJsonSchema, false);
@@ -267,9 +375,13 @@ const acpxProvider: Provider = {
       parseOrThrow(agentMapOutputSchema, output, "acpx agent-map"),
     );
   },
-  async review(root: string, prompt: string, options: ProviderOptions): Promise<ReviewOutput> {
+  async review(
+    root: string,
+    prompt: string,
+    options: ProviderOptions,
+  ): Promise<PartitionedReviewOutput> {
     return runAcpxJson(root, prompt, options.model, reviewJsonSchema, "read", (output) =>
-      parseOrThrow(reviewOutputSchema, output, "acpx review"),
+      parseReviewOutput(output),
     );
   },
   async fix(root: string, prompt: string, options: ProviderOptions): Promise<FixPlanOutput> {
@@ -301,9 +413,13 @@ const grokProvider: Provider = {
     const output = await runGrokJson(root, prompt, options.model, agentMapJsonSchema, true);
     return parseOrThrow(agentMapOutputSchema, output, "grok agent-map");
   },
-  async review(root: string, prompt: string, options: ProviderOptions): Promise<ReviewOutput> {
+  async review(
+    root: string,
+    prompt: string,
+    options: ProviderOptions,
+  ): Promise<PartitionedReviewOutput> {
     const output = await runGrokJson(root, prompt, options.model, reviewJsonSchema, true);
-    return parseOrThrow(reviewOutputSchema, output, "grok review");
+    return parseReviewOutput(output);
   },
   async fix(root: string, prompt: string, options: ProviderOptions): Promise<FixPlanOutput> {
     const output = await runGrokJson(root, prompt, options.model, fixPlanJsonSchema, false);
@@ -334,9 +450,13 @@ const piProvider: Provider = {
     const output = await runPiJson(root, prompt, options, agentMapJsonSchema, true);
     return parseOrThrow(agentMapOutputSchema, output, "pi map");
   },
-  async review(root: string, prompt: string, options: ProviderOptions): Promise<ReviewOutput> {
+  async review(
+    root: string,
+    prompt: string,
+    options: ProviderOptions,
+  ): Promise<PartitionedReviewOutput> {
     const output = await runPiJson(root, prompt, options, reviewJsonSchema, true);
-    return parseOrThrow(reviewOutputSchema, output, "pi review");
+    return parseReviewOutput(output);
   },
   async fix(root: string, prompt: string, options: ProviderOptions): Promise<FixPlanOutput> {
     const output = await runPiJson(root, prompt, options, fixPlanJsonSchema, false);
@@ -480,9 +600,13 @@ const mockProvider: Provider = {
       notes: ["mock agent map"],
     };
   },
-  async review(_root: string, prompt: string): Promise<ReviewOutput> {
+  async review(_root: string, prompt: string): Promise<PartitionedReviewOutput> {
     if (!prompt.includes("TODO_BUG") && !prompt.includes("BUG:")) {
-      return { findings: [], inspected: { files: [], symbols: [], notes: ["mock clean"] } };
+      return {
+        findings: [],
+        inspected: { files: [], symbols: [], notes: ["mock clean"] },
+        droppedFindings: [],
+      };
     }
     const evidencePath = prompt.includes("BAD_EVIDENCE")
       ? "src/not-included.ts"
@@ -536,6 +660,7 @@ const mockProvider: Provider = {
           },
         ],
         inspected: { files: [evidencePath], symbols: [], notes: ["mock mixed findings"] },
+        droppedFindings: [],
       };
     }
     return {
@@ -564,6 +689,7 @@ const mockProvider: Provider = {
         },
       ],
       inspected: { files: [evidencePath], symbols: [], notes: ["mock finding"] },
+      droppedFindings: [],
     };
   },
   async fix(): Promise<FixPlanOutput> {
@@ -618,7 +744,7 @@ const mockFailProvider: Provider = {
   async map(): Promise<AgentMapOutput> {
     throw new ClawpatchError("mock map failure", 1, "mock-failure");
   },
-  async review(): Promise<ReviewOutput> {
+  async review(): Promise<PartitionedReviewOutput> {
     throw new ClawpatchError("mock review failure", 1, "mock-failure");
   },
   async fix(): Promise<FixPlanOutput> {
@@ -1265,6 +1391,7 @@ export const __testing = {
   formatZodIssue,
   parseAcpxAgent,
   parseCodexJson,
+  parseReviewOutput,
   parseOrThrow,
   piThinkingLevel,
   providerJsonSchema,

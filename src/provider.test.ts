@@ -19,10 +19,28 @@ const {
   parseAcpxJsonOutput,
   parseAcpxAgent,
   parseCodexJson,
+  parseReviewOutput,
   parseOrThrow,
   piThinkingLevel,
   providerJsonSchema,
 } = __testing;
+
+function makeFinding(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    title: "Sample finding",
+    category: "bug",
+    severity: "medium",
+    confidence: "high",
+    evidence: [],
+    reasoning: "Sample reasoning.",
+    reproduction: null,
+    recommendation: "Sample recommendation.",
+    whyTestsDoNotAlreadyCoverThis: "Tests do not encode this case.",
+    suggestedRegressionTest: null,
+    minimumFixScope: "Touch only the offending line.",
+    ...overrides,
+  };
+}
 
 function withEnv(name: string, value: string | undefined, fn: () => void): void {
   const previous = process.env[name];
@@ -655,6 +673,85 @@ describe("extractOpencodeJson", () => {
       return;
     }
     throw new Error("expected provider auth failure");
+  });
+});
+
+describe("parseReviewOutput", () => {
+  it("preserves all findings when every finding is valid (fast path)", () => {
+    const output = {
+      findings: [
+        makeFinding({ title: "first", category: "bug" }),
+        makeFinding({ title: "second", category: "security" }),
+        makeFinding({ title: "third", category: "performance" }),
+      ],
+      inspected: { files: ["src/a.ts"], symbols: [], notes: [] },
+    };
+
+    const result = parseReviewOutput(output);
+
+    expect(result.findings).toHaveLength(3);
+    expect(result.findings.map((f) => f.title)).toEqual(["first", "second", "third"]);
+    expect(result.droppedFindings).toEqual([]);
+    expect(result.inspected.files).toEqual(["src/a.ts"]);
+  });
+
+  it("keeps valid siblings when one finding has an invalid category", () => {
+    const output = {
+      findings: [
+        makeFinding({ title: "first", category: "bug" }),
+        makeFinding({ title: "second", category: "security" }),
+        makeFinding({ title: "third", category: "quality" }), // invalid enum value
+        makeFinding({ title: "fourth", category: "performance" }),
+      ],
+      inspected: { files: [], symbols: [], notes: [] },
+    };
+
+    const result = parseReviewOutput(output);
+
+    expect(result.findings).toHaveLength(3);
+    expect(result.findings.map((f) => f.title)).toEqual(["first", "second", "fourth"]);
+    expect(result.droppedFindings).toHaveLength(1);
+    const dropped = result.droppedFindings[0]!;
+    expect(dropped.path[0]).toBe("findings");
+    expect(dropped.path[1]).toBe(2);
+    expect(dropped.path).toContain("category");
+    expect(dropped.message).toBeTypeOf("string");
+    expect(dropped.sample).toContain("quality");
+    expect(dropped.sample.length).toBeLessThanOrEqual(200);
+  });
+
+  it("throws ClawpatchError when findings is not an array", () => {
+    const output = {
+      findings: "not-an-array",
+      inspected: { files: [], symbols: [], notes: [] },
+    };
+
+    try {
+      parseReviewOutput(output);
+    } catch (err) {
+      expect(err).toBeInstanceOf(ClawpatchError);
+      expect((err as ClawpatchError).code).toBe("malformed-output");
+      expect((err as ClawpatchError).exitCode).toBe(8);
+      expect((err as Error).message).toMatch(/findings/u);
+      return;
+    }
+    throw new Error("expected parseReviewOutput to throw on non-array findings");
+  });
+
+  it("truncates oversized samples to 200 characters", () => {
+    const longTitle = "x".repeat(500);
+    const output = {
+      findings: [
+        makeFinding({ title: longTitle, category: "quality" }), // invalid → dropped
+      ],
+      inspected: { files: [], symbols: [], notes: [] },
+    };
+
+    const result = parseReviewOutput(output);
+
+    expect(result.droppedFindings).toHaveLength(1);
+    expect(result.droppedFindings[0]!.sample.length).toBeLessThanOrEqual(200);
+    expect(result.droppedFindings[0]!.sample.endsWith("...")).toBe(true);
   });
 });
 

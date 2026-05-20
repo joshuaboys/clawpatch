@@ -22,7 +22,7 @@ import { stableId, runId } from "./id.js";
 import { mapWithSource } from "./agent-mapper.js";
 import { mapFeatures } from "./mapper.js";
 import { emitProgress } from "./progress.js";
-import { providerByName } from "./provider.js";
+import { providerByName, type DroppedFinding } from "./provider.js";
 import { buildFixPrompt, buildReviewPromptBundle, buildRevalidatePrompt } from "./prompt.js";
 import type { ReviewMode, ReviewPromptManifest } from "./prompt.js";
 import {
@@ -32,7 +32,7 @@ import {
   renderFindingDetail,
   renderReport,
 } from "./reporting.js";
-import { validateReviewOutput } from "./review-validation.js";
+import { validateReviewOutputPartitioned } from "./review-validation.js";
 import {
   filterFeaturesByChangedFiles,
   filterFeaturesByProject,
@@ -343,6 +343,16 @@ export async function reviewCommand(
             allowNonPendingFeatureReview: stringFlag(flags, "feature") !== undefined,
           });
           findingIds.push(...reviewed.findingIds);
+          for (const dropped of reviewed.droppedFindings) {
+            const code = dropped.layer === "validation" ? "validation-drop" : "schema-drop";
+            errors.push({
+              message:
+                `dropped 1 finding from feature ${feature.featureId} ` +
+                `at ${dropped.path.join(".")}: ${dropped.message}`,
+              code,
+              error: null,
+            });
+          }
         } catch (error: unknown) {
           errors.push({
             message: error instanceof Error ? error.message : String(error),
@@ -353,7 +363,10 @@ export async function reviewCommand(
       }
     }),
   );
-  if (errors.length > 0) {
+  const fatalErrors = errors.filter(
+    (entry) => entry.code !== "schema-drop" && entry.code !== "validation-drop",
+  );
+  if (fatalErrors.length > 0) {
     await writeRun(loaded.paths, {
       ...run,
       status: "failed",
@@ -363,15 +376,16 @@ export async function reviewCommand(
     });
     emitProgress(context, "review", "failed", {
       run: currentRunId,
-      errors: errors.length,
+      errors: fatalErrors.length,
     });
-    throw errors[0]?.error ?? new ClawpatchError("review failed", 1, "review-failed");
+    throw fatalErrors[0]?.error ?? new ClawpatchError("review failed", 1, "review-failed");
   }
   const finished: RunRecord = {
     ...run,
     status: "completed",
     finishedAt: nowIso(),
     findingIds,
+    errors: errors.map(({ message, code }) => ({ message, code })),
   };
   await writeRun(loaded.paths, finished);
   emitProgress(context, "review", "done", {
@@ -638,7 +652,9 @@ type ReviewFeatureOptions = {
   allowNonPendingFeatureReview: boolean;
 };
 
-async function reviewFeature(options: ReviewFeatureOptions): Promise<{ findingIds: string[] }> {
+async function reviewFeature(
+  options: ReviewFeatureOptions,
+): Promise<{ findingIds: string[]; droppedFindings: DroppedFinding[] }> {
   const {
     context,
     loaded,
@@ -688,21 +704,27 @@ async function reviewFeature(options: ReviewFeatureOptions): Promise<{ findingId
       index,
       total,
     });
+    // Layer 1 drops: per-finding schema violations from parseReviewOutput.
+    const droppedFindings: DroppedFinding[] = [...providerOutput.droppedFindings];
     const reviewOutput = {
-      ...providerOutput,
       findings: reviewFindingsForMode(providerOutput.findings, mode).slice(
         0,
         config.review.maxFindingsPerFeature,
       ),
+      inspected: providerOutput.inspected,
     };
-    const output = await validateReviewOutput(
+    // Layer 2 drops: per-finding evidence validation (line ranges, quotes,
+    // included files). Partition so a single bad finding doesn't lose the
+    // whole feature.
+    const validated = await validateReviewOutputPartitioned(
       loaded.root,
       lockedFeature,
       config,
       reviewPrompt.manifest,
       reviewOutput,
     );
-    const records = output.findings.map((finding) =>
+    droppedFindings.push(...validated.droppedFindings);
+    const records = validated.findings.map((finding) =>
       findingFromOutput(finding, lockedFeature.featureId, currentRunId),
     );
     const findingIds: string[] = [];
@@ -743,7 +765,7 @@ async function reviewFeature(options: ReviewFeatureOptions): Promise<{ findingId
       findings: findingIds.length,
       elapsed: `${Math.round((Date.now() - started) / 1000)}s`,
     });
-    return { findingIds };
+    return { findingIds, droppedFindings };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     if (locked !== null) {

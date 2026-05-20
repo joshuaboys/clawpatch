@@ -7,6 +7,7 @@
 - Added review prompt provenance and budget accounting for included files, omitted files, prompt bytes, and approximate tokens.
 - Added retries for transient acpx JSON review failures via `--prompt-retries` and `CLAWPATCH_REVIEW_RETRIES`, thanks @coletebou.
 - Hardened review ingestion so provider findings must cite included files with valid line ranges and matching evidence quotes.
+- Fixed provider review to preserve valid sibling findings when per-finding schema or evidence validation fails, recording drops in `run.errors` as non-fatal `schema-drop` or `validation-drop` entries, thanks @coletebou.
 - Improved provider schema validation failures so `run.errors[].message` shows compact one-line Zod issue summaries, thanks @coletebou.
 - Added `total` and `results` aliases on `clawpatch report --json` output while keeping the legacy `findings` count, thanks @coletebou.
 - Fixed `clawpatch open-pr` so repositories without default-branch metadata use a dedicated patch branch and let GitHub choose the PR base.
