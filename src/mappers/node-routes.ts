@@ -844,7 +844,7 @@ function readStringPropertyValues(source: string, property: string): string[] {
     const valueStart = (match.index ?? 0) + match[0].length;
     const literal = readStringLiteralArgument(source, valueStart);
     if (literal !== null) {
-      const delimiter = nextRouteValueDelimiter(source, literal.end);
+      const delimiter = nextRoutePropertyDelimiter(source, literal.end);
       if (delimiter === "," || delimiter === "}") {
         return [literal.value];
       }
@@ -854,7 +854,7 @@ function readStringPropertyValues(source: string, property: string): string[] {
     if (array === null) {
       continue;
     }
-    const delimiter = nextRouteValueDelimiter(source, array.end);
+    const delimiter = nextRoutePropertyDelimiter(source, array.end);
     if (delimiter === "," || delimiter === "}") {
       return array.values;
     }
@@ -896,12 +896,67 @@ function readStringProperty(source: string, property: string): string | null {
     if (literal === null) {
       continue;
     }
-    const delimiter = nextRouteValueDelimiter(source, literal.end);
+    const delimiter = nextRoutePropertyDelimiter(source, literal.end);
     if (delimiter === "," || delimiter === "}") {
       return literal.value;
     }
   }
   return null;
+}
+
+function nextRoutePropertyDelimiter(source: string, start: number): string | null {
+  const suffixEnd = skipTypeScriptValueSuffix(source, start);
+  return nextRouteValueDelimiter(source, suffixEnd);
+}
+
+function skipTypeScriptValueSuffix(source: string, start: number): number {
+  let cursor = skipWhitespaceAndComments(source, start);
+  if (isKeywordAt(source, cursor, "as")) {
+    cursor = skipWhitespaceAndComments(source, cursor + "as".length);
+    if (isKeywordAt(source, cursor, "const")) {
+      return skipWhitespaceAndComments(source, cursor + "const".length);
+    }
+    return start;
+  }
+  if (isKeywordAt(source, cursor, "satisfies")) {
+    return skipTypeSuffix(source, cursor + "satisfies".length);
+  }
+  return start;
+}
+
+function skipTypeSuffix(source: string, start: number): number {
+  let quote: string | null = null;
+  let escaped = false;
+  let depth = 0;
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === undefined) {
+      return index;
+    }
+    if (quote !== null) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (char === "'" || char === '"' || char === "`") {
+      quote = char;
+    } else if (char === "(" || char === "[" || char === "{") {
+      depth += 1;
+    } else if (char === ")" || char === "]" || char === "}") {
+      if (depth === 0) {
+        return index;
+      }
+      depth -= 1;
+    } else if (char === "," && depth === 0) {
+      return index;
+    }
+  }
+  return source.length;
 }
 
 function readIdentifierProperty(source: string, property: string): string | null {
