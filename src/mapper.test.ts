@@ -13007,6 +13007,55 @@ add_executable(headerapp include/headers.hpp)
     expect(admin?.trustBoundaries).toContain("auth");
   });
 
+  it("maps static Flask blueprint url prefixes", async () => {
+    const root = await fixtureRoot("clawpatch-python-flask-blueprint-prefixes-");
+    await writeFixture(root, "requirements.txt", "Flask\npytest\n");
+    await writeFixture(
+      root,
+      "web/app.py",
+      [
+        "from flask import Blueprint, Flask",
+        "",
+        "app = Flask(__name__)",
+        "API_PREFIX = '/dynamic'",
+        "api_bp = Blueprint('api', __name__, url_prefix='/api')",
+        "registered_bp = Blueprint('registered', __name__)",
+        "dynamic_bp = Blueprint('dynamic', __name__, url_prefix=API_PREFIX)",
+        "runtime_bp = Blueprint('runtime', __name__)",
+        "app.register_blueprint(registered_bp, url_prefix='/registered')",
+        "app.register_blueprint(runtime_bp, url_prefix=API_PREFIX)",
+        "",
+        "@api_bp.route('/users')",
+        "def users():",
+        "    return 'users'",
+        "",
+        "@registered_bp.route('/reports', methods=['POST'])",
+        "def reports():",
+        "    return 'reports'",
+        "",
+        "@dynamic_bp.route('/metrics')",
+        "def metrics():",
+        "    return 'metrics'",
+        "",
+        "@runtime_bp.route('/events')",
+        "def events():",
+        "    return 'events'",
+        "",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(titles).toContain("Flask route GET /api/users");
+    expect(titles).toContain("Flask route POST /registered/reports");
+    expect(titles).toContain("Flask route GET /metrics");
+    expect(titles).toContain("Flask route GET /events");
+    expect(titles).not.toContain("Flask route GET /dynamic/metrics");
+    expect(titles).not.toContain("Flask route GET /dynamic/events");
+  });
+
   it("maps root-level Flask entry files and non-list methods", async () => {
     const root = await fixtureRoot("clawpatch-python-flask-root-routes-");
     await writeFixture(root, "requirements.txt", "Flask\npytest\n");
