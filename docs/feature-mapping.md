@@ -37,7 +37,8 @@ Supported deterministic mappers today:
 - Nx project metadata from `project.json`, including project names, source roots, project types, and target names
 - Turborepo `turbo.json` metadata for workspace-aware validation commands and feature context
 - bounded Node/TypeScript source groups under `src/`, `lib/`, `app/`,
-  `pages/`, `scripts/`, `server/`, and `api/`
+  `pages/`, `scripts/`, `server/`, and `api/`, with oversized flat
+  directories split by repeated filename families
 - React Router `<Route path element>` declarations and React components in
   root or nested frontend packages such as `frontend/`, `client/`, `web/`,
   workspaces, and packages under `apps/` or `packages/`
