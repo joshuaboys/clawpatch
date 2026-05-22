@@ -171,7 +171,8 @@ from literal route strings and simple named regex groups, and literal
 Python command detection covers pytest, ruff, mypy, pyright, and black.
 
 Ruby mapping covers project metadata, executables, source groups, RSpec and
-Minitest suites, and Rails app structure. Rails legacy `config/secrets.yml`,
+Minitest suites, Rails app structure, and literal Rails root and HTTP verb
+routes. Rails legacy `config/secrets.yml`,
 `config/database.yml`, and `config/initializers/secret_token.rb` are not mapped
 as reviewable config because they can contain provider-sensitive secrets.
 

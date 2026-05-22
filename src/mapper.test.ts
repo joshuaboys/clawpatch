@@ -1659,6 +1659,10 @@ describe("mapFeatures", () => {
       root,
       "config/routes.rb",
       [
+        "get '/outside-before', to: 'outside#show'",
+        "def helper_route",
+        "  get '/helper-outside', to: 'outside#show'",
+        "end",
         "Rails.application.routes.draw do",
         "  root 'home#index'",
         "  get '/admin/users', to: 'admin/users#index'",
@@ -1703,6 +1707,7 @@ describe("mapFeatures", () => {
         "  match '/legacy', to: 'legacy#show', via: :get",
         "  resources :posts",
         "end",
+        "get '/outside-after', to: 'outside#show'",
       ].join("\n"),
     );
     await writeFixture(
@@ -1791,6 +1796,9 @@ describe("mapFeatures", () => {
     expect(titles).not.toContain("Rails route GET /brace-leaked");
     expect(titles).not.toContain("Rails route GET /constraint-health");
     expect(titles).not.toContain("Rails route GET /legacy");
+    expect(titles).not.toContain("Rails route GET /outside-before");
+    expect(titles).not.toContain("Rails route GET /helper-outside");
+    expect(titles).not.toContain("Rails route GET /outside-after");
     expect(titles).toContain("Rails route GET /public");
     expect(rootRoute?.source).toBe("rails-route");
     expect(rootRoute?.entrypoints[0]).toMatchObject({

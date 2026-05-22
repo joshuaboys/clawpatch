@@ -491,11 +491,20 @@ async function railsSeeds(
 function railsRouteDeclarations(source: string): RailsRoute[] {
   const routes: RailsRoute[] = [];
   const seen = new Set<string>();
+  let drawBlockDepth = 0;
   let skippedBlockDepth = 0;
   for (const line of stripRubyComments(source).split("\n")) {
     const blockDelta = railsLineBlockDelta(line);
+    if (drawBlockDepth === 0) {
+      if (startsRailsRoutesDrawBlock(line) && blockDelta > 0) {
+        drawBlockDepth = blockDelta;
+      }
+      continue;
+    }
+
     if (skippedBlockDepth > 0) {
       skippedBlockDepth = Math.max(0, skippedBlockDepth + blockDelta);
+      drawBlockDepth = Math.max(0, drawBlockDepth + blockDelta);
       continue;
     }
     const route = parseRailsRouteLine(line);
@@ -510,9 +519,10 @@ function railsRouteDeclarations(source: string): RailsRoute[] {
       continue;
     }
 
-    if (!startsRailsRoutesDrawBlock(line) && blockDelta > 0) {
+    if (blockDelta > 0) {
       skippedBlockDepth = blockDelta;
     }
+    drawBlockDepth = Math.max(0, drawBlockDepth + blockDelta);
   }
   return routes;
 }
