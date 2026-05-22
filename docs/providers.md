@@ -286,8 +286,8 @@ How the Cursor provider works:
 - Read-only operations: also pass Cursor's documented `--mode ask`
 - Output: parses Cursor's `type: "result"` JSON envelope and then extracts the
   Clawpatch JSON object from the `result` text
-- Prompt delivery: passes the full Clawpatch prompt as Cursor's positional
-  `[prompt...]` argument
+- Prompt delivery: writes the full Clawpatch prompt to a temporary file, then
+  passes a short positional `[prompt...]` instruction telling Cursor to read it
 - Model selection: passes `--model <model>` when configured
 - Model names: pass Cursor model ids, for example `composer-2.5` for Composer
   2.5 without fast mode
@@ -315,7 +315,7 @@ and separately requires `CLAWPATCH_CURSOR_ALLOW_WRITE=1` for `fix`. The
 implementation uses `--trust` for the explicit trusted-workspace path and never
 uses `--force` or `--yolo`. Complete HITL verification before promoting this to
 default provider support, especially for ambient rules, MCP configuration,
-positional prompt exposure, timeout behavior, and any claimed read-only mode.
+temporary prompt file handling, timeout behavior, and any claimed read-only mode.
 
 Direct OpenAI API, local-model, and multi-model panel providers are not
 implemented yet. The `acpx` provider is the generic route for ACP-compatible

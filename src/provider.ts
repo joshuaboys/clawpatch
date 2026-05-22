@@ -528,17 +528,24 @@ async function runCursorJson(
   readOnly: boolean,
 ): Promise<unknown> {
   await checkedCursorRuntimeVersion(root);
-  const fullPrompt = cursorPrompt(prompt, schema, readOnly);
-  const args = cursorAgentArgs(root, options, readOnly, fullPrompt);
-  const result = await runCursorAgent(root, args);
-  if (result.exitCode !== 0) {
-    throw new ClawpatchError(
-      cursorFailureMessage(result.stdout, result.stderr, result.exitCode),
-      providerExitCode(`${result.stderr}\n${result.stdout}`),
-      "provider-failure",
-    );
+  const dir = await mkdtemp(join(tmpdir(), "clawpatch-cursor-"));
+  const promptPath = join(dir, "prompt.txt");
+  await writeFile(promptPath, cursorPrompt(prompt, schema, readOnly), "utf8");
+
+  try {
+    const args = cursorAgentArgs(root, options, readOnly, promptPath);
+    const result = await runCursorAgent(root, args);
+    if (result.exitCode !== 0) {
+      throw new ClawpatchError(
+        cursorFailureMessage(result.stdout, result.stderr, result.exitCode),
+        providerExitCode(`${result.stderr}\n${result.stdout}`),
+        "provider-failure",
+      );
+    }
+    return extractCursorJson(result.stdout);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
-  return extractCursorJson(result.stdout);
 }
 
 async function checkedCursorRuntimeVersion(root: string): Promise<string> {
@@ -560,7 +567,7 @@ function cursorAgentArgs(
   root: string,
   options: ProviderOptions,
   readOnly: boolean,
-  prompt: string,
+  promptPath: string,
 ): string[] {
   const args = ["--trust", "-p", "--output-format", "json", "--workspace", root];
   if (readOnly) {
@@ -569,8 +576,12 @@ function cursorAgentArgs(
   if (options.model !== null) {
     args.push("--model", options.model);
   }
-  args.push(prompt);
+  args.push(cursorPromptArgument(promptPath));
   return args;
+}
+
+function cursorPromptArgument(promptPath: string): string {
+  return `Read the complete Clawpatch prompt from ${promptPath}. Follow it exactly. Return only the requested JSON object.`;
 }
 
 async function runCursorAgent(

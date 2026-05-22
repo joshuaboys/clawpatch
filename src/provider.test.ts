@@ -374,7 +374,7 @@ describe("Cursor provider", () => {
         skipGitRepoCheck: true,
       },
       true,
-      "review prompt",
+      "/tmp/clawpatch-cursor/prompt.txt",
     );
 
     expect(args).toEqual([
@@ -388,7 +388,7 @@ describe("Cursor provider", () => {
       "ask",
       "--model",
       "cursor-model",
-      "review prompt",
+      "Read the complete Clawpatch prompt from /tmp/clawpatch-cursor/prompt.txt. Follow it exactly. Return only the requested JSON object.",
     ]);
     expect(args).not.toContain("--force");
     expect(args).not.toContain("--yolo");
@@ -403,7 +403,7 @@ describe("Cursor provider", () => {
         skipGitRepoCheck: false,
       },
       false,
-      "fix prompt",
+      "/tmp/clawpatch-cursor/prompt.txt",
     );
 
     expect(args).toEqual([
@@ -413,7 +413,7 @@ describe("Cursor provider", () => {
       "json",
       "--workspace",
       "/repo",
-      "fix prompt",
+      "Read the complete Clawpatch prompt from /tmp/clawpatch-cursor/prompt.txt. Follow it exactly. Return only the requested JSON object.",
     ]);
   });
 
