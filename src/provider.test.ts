@@ -406,6 +406,8 @@ describe("providerExitCode", () => {
 
   it("keeps classifying stderr failures", () => {
     expect(providerExitCode("", "please login before running the provider")).toBe(4);
+    expect(providerExitCode("", "expired API key")).toBe(4);
+    expect(providerExitCode("", "auth credentials not found")).toBe(4);
   });
 
   it("keeps generic failures when neither stream has a known signal", () => {
@@ -723,6 +725,38 @@ describe("extractOpencodeJson", () => {
       return;
     }
     throw new Error("expected provider auth failure");
+  });
+
+  it("classifies opencode stderr-style error events as provider auth failures", () => {
+    const stdout = JSON.stringify({
+      type: "error",
+      error: { data: { message: "auth credentials not found" } },
+    });
+
+    try {
+      extractOpencodeJson(stdout);
+    } catch (err) {
+      expect(err).toBeInstanceOf(ClawpatchError);
+      expect((err as ClawpatchError).exitCode).toBe(4);
+      return;
+    }
+    throw new Error("expected provider auth failure");
+  });
+
+  it("classifies opencode stderr-style error events as provider quota failures", () => {
+    const stdout = JSON.stringify({
+      type: "error",
+      error: { data: { message: "rate limit" } },
+    });
+
+    try {
+      extractOpencodeJson(stdout);
+    } catch (err) {
+      expect(err).toBeInstanceOf(ClawpatchError);
+      expect((err as ClawpatchError).exitCode).toBe(5);
+      return;
+    }
+    throw new Error("expected provider quota failure");
   });
 });
 

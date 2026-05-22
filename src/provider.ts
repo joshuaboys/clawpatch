@@ -933,7 +933,7 @@ export function extractOpencodeJson(stdout: string): unknown {
               : "unknown";
       throw new ClawpatchError(
         `opencode provider error: ${message}`,
-        providerExitCode(message),
+        providerExitCode("", message),
         "provider-failure",
       );
     }
@@ -1277,13 +1277,20 @@ const PROVIDER_AUTH_FAILURE_PATTERN =
   /\b(?:unauthori[sz]ed|(?:wrong|incorrect|invalid|missing|no)[\s_-]+api[\s_-]*key|api[\s_-]*key\s+(?:is\s+)?(?:missing|required|invalid|expired|not[\s_-]+found|not[\s_-]+set)|[A-Z0-9_]*API[_-]?KEY\s+(?:is\s+)?(?:missing|required|invalid|expired|not[\s_-]+set)|not authenticated|auth(?:entication|orization)?[\s_-]*(?:failed|required|missing|error)|login\s+(?:required|failed)|please\s+(?:log\s*in|login)|missing scopes?|insufficient permissions?|api\.responses\.write)\b/iu;
 const PROVIDER_QUOTA_FAILURE_PATTERN =
   /\b(?:quota[\s_-]+(?:exceeded|exhausted|reached)|(?:exceeded|exhausted|reached)[\s_-]+(?:your[\s_-]+)?(?:current[\s_-]+)?quota|insufficient[\s_-]+quota|out[\s_-]+of[\s_-]+quota|rate[\s_-]*limit(?:ed|[\s_-]*(?:error|exceeded|reached))|too many requests)\b/iu;
+const PROVIDER_STDERR_AUTH_FAILURE_PATTERN = /auth|login|api key|unauthorized|wrong api key/iu;
+const PROVIDER_STDERR_QUOTA_FAILURE_PATTERN = /quota|rate.?limit/iu;
 
 function providerExitCode(stdout: string, stderr = ""): number {
-  const output = `${stderr}\n${stdout}`;
-  if (PROVIDER_AUTH_FAILURE_PATTERN.test(output)) {
+  if (
+    PROVIDER_STDERR_AUTH_FAILURE_PATTERN.test(stderr) ||
+    PROVIDER_AUTH_FAILURE_PATTERN.test(stdout)
+  ) {
     return 4;
   }
-  if (PROVIDER_QUOTA_FAILURE_PATTERN.test(output)) {
+  if (
+    PROVIDER_STDERR_QUOTA_FAILURE_PATTERN.test(stderr) ||
+    PROVIDER_QUOTA_FAILURE_PATTERN.test(stdout)
+  ) {
     return 5;
   }
   return 1;
