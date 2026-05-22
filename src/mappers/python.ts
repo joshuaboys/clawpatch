@@ -1317,7 +1317,8 @@ function sourceLooksFlask(source: string): boolean {
 
 function parseFlaskRoutes(filePath: string, source: string): FlaskRoute[] {
   const routes: FlaskRoute[] = [];
-  let pending: Array<{ routePath: string; methods: string[] }> = [];
+  const prefixes = parseFlaskBlueprintPrefixes(source);
+  let pending: Array<{ target: string; routePath: string; methods: string[] }> = [];
   let decoratorSource: string | null = null;
   let decoratorDepth = 0;
   for (const line of source.split("\n")) {
@@ -1353,7 +1354,12 @@ function parseFlaskRoutes(filePath: string, source: string): FlaskRoute[] {
     const functionName = /^\s*(?:async\s+)?def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/u.exec(line)?.[1];
     if (functionName !== undefined && pending.length > 0) {
       for (const item of pending) {
-        routes.push({ filePath, functionName, ...item });
+        routes.push({
+          filePath,
+          functionName,
+          routePath: combineFastApiPaths(prefixes.get(item.target) ?? "", item.routePath),
+          methods: item.methods,
+        });
       }
       pending = [];
       continue;
@@ -1375,21 +1381,142 @@ function startsFlaskRouteDecorator(line: string): boolean {
   return /^@[A-Za-z_][A-Za-z0-9_.]*\.route\(/u.test(line);
 }
 
-function parseFlaskRouteDecorator(line: string): { routePath: string; methods: string[] } | null {
-  const match = /^\s*@[A-Za-z_][A-Za-z0-9_.]*\.route\(\s*(["'])(.*?)\1(.*)\)\s*(?:#.*)?$/u.exec(
+function parseFlaskRouteDecorator(
+  line: string,
+): { target: string; routePath: string; methods: string[] } | null {
+  const match = /^\s*@([A-Za-z_][A-Za-z0-9_.]*)\.route\(\s*(["'])(.*?)\2(.*)\)\s*(?:#.*)?$/u.exec(
     line,
   );
-  if (match?.[2] === undefined) {
+  const target = match?.[1];
+  const routePath = match?.[3];
+  if (target === undefined || routePath === undefined) {
     return null;
   }
-  const methods = parsePythonRouteMethods(match[3] ?? "");
+  const methods = parsePythonRouteMethods(match?.[4] ?? "");
   if (methods === null) {
     return null;
   }
   return {
-    routePath: match[2],
+    target,
+    routePath,
     methods,
   };
+}
+
+function parseFlaskBlueprintPrefixes(source: string): Map<string, string | null> {
+  const prefixes = new Map<string, string | null>();
+  for (const [target, prefix] of parseFlaskBlueprintConstructorPrefixes(source)) {
+    prefixes.set(target, prefix);
+  }
+  for (const [target, prefix] of parseFlaskBlueprintRegistrationPrefixes(source)) {
+    prefixes.set(target, prefix);
+  }
+  return prefixes;
+}
+
+function parseFlaskBlueprintConstructorPrefixes(source: string): Map<string, string> {
+  const prefixes = new Map<string, string>();
+  const blueprintCallPattern = /\bBlueprint\s*\(/gu;
+  for (const match of source.matchAll(blueprintCallPattern)) {
+    const callStart = match.index;
+    const openParenIndex = source.indexOf("(", callStart);
+    if (openParenIndex === -1) {
+      continue;
+    }
+    const prefixSegment = source.slice(0, callStart).trimEnd();
+    const varName =
+      /(?:^|[\n;])\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?::[^=\n;]+)?=\s*(?:[A-Za-z_][A-Za-z0-9_]*\.)?$/u.exec(
+        prefixSegment,
+      )?.[1];
+    if (varName === undefined) {
+      continue;
+    }
+    const closeParenIndex = findBalancedParenthesis(source, openParenIndex + 1);
+    if (closeParenIndex === -1) {
+      continue;
+    }
+    const args = splitTopLevelPythonArgs(source.slice(openParenIndex + 1, closeParenIndex));
+    const prefix = parsePythonKeywordStringArg(args, "url_prefix");
+    if (prefix !== null) {
+      prefixes.set(varName, prefix);
+    }
+  }
+  return prefixes;
+}
+
+function parseFlaskBlueprintRegistrationPrefixes(source: string): Map<string, string | null> {
+  const prefixes = new Map<string, string | null>();
+  const registerCallPattern = /\.register_blueprint\s*\(/gu;
+  for (const match of source.matchAll(registerCallPattern)) {
+    const callStart = match.index;
+    const openParenIndex = source.indexOf("(", callStart);
+    if (openParenIndex === -1) {
+      continue;
+    }
+    const closeParenIndex = findBalancedParenthesis(source, openParenIndex + 1);
+    if (closeParenIndex === -1) {
+      continue;
+    }
+    const args = splitTopLevelPythonArgs(source.slice(openParenIndex + 1, closeParenIndex));
+    const target = args[0]?.trim();
+    if (target === undefined || !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(target)) {
+      continue;
+    }
+    const prefixValue = parsePythonKeywordArgValue(args, "url_prefix");
+    if (prefixValue !== undefined) {
+      const normalizedPrefixValue = stripPythonInlineComment(prefixValue).trim();
+      if (normalizedPrefixValue === "None") {
+        continue;
+      }
+      prefixes.set(target, pythonStringLiteralValue(normalizedPrefixValue));
+    }
+  }
+  return prefixes;
+}
+
+function parsePythonKeywordStringArg(args: string[], name: string): string | null {
+  const value = parsePythonKeywordArgValue(args, name);
+  return value === undefined
+    ? null
+    : pythonStringLiteralValue(stripPythonInlineComment(value).trim());
+}
+
+function parsePythonKeywordArgValue(args: string[], name: string): string | undefined {
+  const pattern = new RegExp(`^\\s*${name}\\s*=\\s*([\\s\\S]*)$`, "u");
+  return pattern.exec(args.find((arg) => pattern.test(arg)) ?? "")?.[1];
+}
+
+function stripPythonInlineComment(source: string): string {
+  let quote: string | null = null;
+  let escaped = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === undefined) {
+      break;
+    }
+    if (quote !== null) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === "#") {
+      return source.slice(0, index);
+    }
+  }
+  return source;
 }
 
 function parsePythonRouteMethods(args: string): string[] | null {
