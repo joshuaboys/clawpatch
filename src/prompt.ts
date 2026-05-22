@@ -367,7 +367,7 @@ export async function buildFixPrompt(
 ): Promise<string> {
   const fileBlocks: string[] = [];
   for (const path of fixPromptPaths(finding, feature, config)) {
-    fileBlocks.push(await fileBlock(root, path));
+    fileBlocks.push(await rawFileBlock(root, path));
   }
   return `You are clawpatch applying one small repair in the current repository.
 
@@ -444,8 +444,25 @@ function fixPromptPaths(
   return paths;
 }
 
-async function fileBlock(root: string, path: string): Promise<string> {
-  return (await fileBlockWithManifest(root, path, "context")).block;
+async function rawFileBlock(root: string, path: string): Promise<string> {
+  const full = resolve(root, path);
+  if (!isInside(root, full)) {
+    return `--- ${path}\n[path escapes repository root]`;
+  }
+  const realRoot = await realpath(root).catch(() => root);
+  const realFull = await realpath(full).catch(() => full);
+  if (!isInside(realRoot, realFull)) {
+    return `--- ${path}\n[path escapes repository root]`;
+  }
+  const contents = await readFile(full, "utf8").catch(() => null);
+  if (contents === null) {
+    return `--- ${path}\n[unreadable]`;
+  }
+  const truncated = contents.length > REVIEW_PROMPT_FILE_CHAR_LIMIT;
+  const trimmed = truncated
+    ? `${contents.slice(0, REVIEW_PROMPT_FILE_CHAR_LIMIT)}\n...[truncated]`
+    : contents;
+  return `--- ${path}\n${trimmed}`;
 }
 
 async function fileBlockWithManifest(

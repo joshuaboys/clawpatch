@@ -190,6 +190,7 @@ describe("review prompt provenance", () => {
 
     expect(prompt).toContain("--- ./src/index.ts");
     expect(prompt).toContain("export const value = 1;");
+    expect(prompt).not.toContain("1 | export const value = 1;");
     expect(prompt).not.toContain("--- src/other.ts");
   });
 });
