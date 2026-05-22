@@ -10,7 +10,7 @@ type Clock = {
 const defaultClock: Clock = {
   now: () => Date.now(),
   setTimeout: (handler, ms) => {
-    setTimeout(handler, ms).unref?.();
+    setTimeout(handler, ms);
   },
 };
 

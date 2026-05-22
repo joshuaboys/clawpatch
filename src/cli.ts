@@ -169,6 +169,7 @@ const commandFlags = {
     "dryRun",
     "promptFile",
     "exportTribunalLedger",
+    "includeDirty",
   ]),
   ci: new Set([
     "limit",
@@ -179,6 +180,7 @@ const commandFlags = {
     "reasoningEffort",
     "skipGitRepoCheck",
     "output",
+    "includeDirty",
   ]),
   report: new Set(["status", "severity", "feature", "project", "category", "triage", "output"]),
   show: new Set(["finding"]),
@@ -200,6 +202,7 @@ const commandFlags = {
     "model",
     "reasoningEffort",
     "skipGitRepoCheck",
+    "includeDirty",
   ]),
   doctor: new Set(["provider", "model", "reasoningEffort"]),
   "clean-locks": new Set<string>(),
@@ -255,6 +258,7 @@ const booleanFlagNames = new Set([
   "force",
   "all",
   "draft",
+  "include-dirty",
 ]);
 
 const shortFlagNames = new Set(["-h", "-q", "-v", "-o"]);
@@ -297,7 +301,8 @@ function validateCommandRequirements(
     command === "revalidate" &&
     typeof flags["finding"] !== "string" &&
     flags["all"] !== true &&
-    typeof flags["since"] !== "string"
+    typeof flags["since"] !== "string" &&
+    flags["includeDirty"] !== true
   ) {
     throw new ClawpatchError("missing --finding or --all", 2, "invalid-usage");
   }
@@ -411,6 +416,7 @@ Flags:
   --project <name-or-root>
   --limit <n>
   --since <ref>
+  --include-dirty
   --jobs <n>        default: ~half of CPU cores, max 10
   --mode <default|deslopify>
   --rate-limit-per-minute <n>   cap provider calls per 60s window (env: CLAWPATCH_RPM)
@@ -457,8 +463,9 @@ Usage:
 
 Flags:
   --since <ref>
+  --include-dirty
   --limit <n>
-  --jobs <n>        default: 10
+  --jobs <n>        default: ~half of CPU cores, max 10
   --provider <name>
   --model <name>
   --reasoning-effort <none|minimal|low|medium|high|xhigh>
@@ -588,6 +595,7 @@ Flags:
   --triage <triage>
   --limit <n>
   --since <ref>
+  --include-dirty
   --provider <name>
   --model <name>
   --reasoning-effort <none|minimal|low|medium|high|xhigh>
