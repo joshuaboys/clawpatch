@@ -166,12 +166,13 @@ pytest files; Flask `@*.route(...)` handlers; FastAPI `@*.get(...)` /
 `re_path(...)`, and legacy `url(...)` declarations. Flask and FastAPI route
 methods are read from list, tuple, or set literals. FastAPI paths can be
 positional strings or literal `path=` keywords. Django route paths are normalized
-from literal route strings and simple named regex groups; includes are mapped as
-their own URL groups without recursively expanding imported URL configs. Default
+from literal route strings and simple named regex groups, and literal
+`include("module.urls")` routes are expanded under their mount prefixes. Default
 Python command detection covers pytest, ruff, mypy, pyright, and black.
 
 Ruby mapping covers project metadata, executables, source groups, RSpec and
-Minitest suites, and Rails app structure. Rails legacy `config/secrets.yml`,
+Minitest suites, Rails app structure, and literal Rails root and HTTP verb
+routes. Rails legacy `config/secrets.yml`,
 `config/database.yml`, and `config/initializers/secret_token.rb` are not mapped
 as reviewable config because they can contain provider-sensitive secrets.
 

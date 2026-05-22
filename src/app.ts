@@ -1,6 +1,6 @@
 import { appendFile, lstat, readFile, realpath, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
-import { hostname } from "node:os";
+import { cpus, hostname } from "node:os";
 import {
   changedPathsBetweenSnapshots,
   hasSourceDirtyWorktree,
@@ -74,6 +74,7 @@ import {
   reasoningEfforts,
 } from "./types.js";
 import { validationCommandsForFeature } from "./validation.js";
+import { createRpmLimiter, defaultJobs, rpmFromFlag, type RpmLimiter } from "./rpm-limiter.js";
 
 export type AppContext = {
   root: string;
@@ -123,12 +124,14 @@ export async function mapCommand(
   const config = applyProviderFlags(loaded.config, flags);
   const provider = source === "heuristic" ? null : providerByName(config.provider.name);
   const existing = await readFeatures(loaded.paths);
+  const filters = { include: config.include, exclude: config.exclude };
   emitProgress(context, "map", "start", {
     source,
     existing: existing.length,
     dryRun: flags["dryRun"] === true,
   });
   const heuristic = await mapFeatures(loaded.root, loaded.project, existing, {
+    filters,
     onProgress: (event) => {
       emitProgress(context, "map", event.event, {
         mapper: event.mapper,
@@ -149,7 +152,7 @@ export async function mapCommand(
     source,
     provider,
     providerOptions: providerOptions(config),
-    inventory: { include: config.include, exclude: config.exclude },
+    inventory: filters,
     onProgress: (event, fields) => {
       emitProgress(context, "map", event, fields);
     },
@@ -313,6 +316,9 @@ export async function reviewCommand(
     error: unknown;
   }> = [];
   const jobs = Math.min(reviewJobs(flags), Math.max(features.length, 1));
+  const limiter = createRpmLimiter(
+    rpmFromFlag(stringFlag(flags, "rateLimitPerMinute"), process.env["CLAWPATCH_RPM"]),
+  );
   let cursor = 0;
   emitProgress(context, "review", "start", {
     run: currentRunId,
@@ -340,6 +346,7 @@ export async function reviewCommand(
             total: features.length,
             mode,
             customPrompt,
+            limiter,
             allowNonPendingFeatureReview: stringFlag(flags, "feature") !== undefined,
           });
           findingIds.push(...reviewed.findingIds);
@@ -649,6 +656,7 @@ type ReviewFeatureOptions = {
   total: number;
   mode: ReviewMode;
   customPrompt: string | null;
+  limiter: RpmLimiter;
   allowNonPendingFeatureReview: boolean;
 };
 
@@ -666,6 +674,7 @@ async function reviewFeature(
     total,
     mode,
     customPrompt,
+    limiter,
     allowNonPendingFeatureReview,
   } = options;
   const started = Date.now();
@@ -703,6 +712,7 @@ async function reviewFeature(
       featureId: feature.featureId,
       index,
       total,
+      limiter,
     });
     // Layer 1 drops: per-finding schema violations from parseReviewOutput.
     const droppedFindings: DroppedFinding[] = [...providerOutput.droppedFindings];
@@ -815,12 +825,14 @@ async function runProviderReviewWithRetry(args: {
   featureId: string;
   index: number;
   total: number;
+  limiter?: RpmLimiter;
 }): Promise<ProviderReviewOutput> {
-  const { provider, root, prompt, options, context, featureId, index, total } = args;
+  const { provider, root, prompt, options, context, featureId, index, total, limiter } = args;
   const maxAttempts = 1 + reviewRetries();
   let lastError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
+      await limiter?.acquire();
       return await provider.review(root, prompt, options);
     } catch (error: unknown) {
       lastError = error;
@@ -1401,7 +1413,7 @@ function reviewFlagSubset(
   flags: Record<string, string | boolean>,
 ): Record<string, string | boolean> {
   const subset = providerFlagSubset(flags);
-  for (const flag of ["since", "limit", "jobs"] as const) {
+  for (const flag of ["since", "limit", "jobs", "rateLimitPerMinute"] as const) {
     const value = stringFlag(flags, flag);
     if (value !== undefined) {
       subset[flag] = value;
@@ -2009,6 +2021,21 @@ async function filterFindingsByOwnedFilesSince(
   return filterFindingsByChangedOwnedFiles(findings, features, changed);
 }
 
+export function reviewJobs(
+  flags: Record<string, string | boolean>,
+  coreCount: number = cpus().length,
+): number {
+  const explicit = stringFlag(flags, "jobs");
+  if (explicit !== undefined) {
+    const parsed = Number(explicit);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      return 1;
+    }
+    return Math.min(Math.floor(parsed), 32);
+  }
+  return defaultJobs(coreCount);
+}
+
 async function changedFiles(
   root: string,
   flags: Record<string, string | boolean>,
@@ -2030,14 +2057,6 @@ async function changedFiles(
 
 function hasFileFilter(flags: Record<string, string | boolean>): boolean {
   return stringFlag(flags, "since") !== undefined || flags["includeDirty"] === true;
-}
-
-function reviewJobs(flags: Record<string, string | boolean>): number {
-  const parsed = Number(stringFlag(flags, "jobs") ?? "10");
-  if (!Number.isFinite(parsed) || parsed < 1) {
-    return 1;
-  }
-  return Math.min(Math.floor(parsed), 32);
 }
 
 function reviewMode(flags: Record<string, string | boolean>): ReviewMode {
