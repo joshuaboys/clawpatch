@@ -286,7 +286,8 @@ How the Cursor provider works:
 - Read-only operations: also pass Cursor's documented `--mode ask`
 - Output: parses Cursor's `type: "result"` JSON envelope and then extracts the
   Clawpatch JSON object from the `result` text
-- Prompt delivery: writes the full Clawpatch prompt to Cursor's stdin
+- Prompt delivery: passes the full Clawpatch prompt as Cursor's positional
+  `[prompt...]` argument
 - Model selection: passes `--model <model>` when configured
 - Model names: pass Cursor model ids, for example `composer-2.5` for Composer
   2.5 without fast mode

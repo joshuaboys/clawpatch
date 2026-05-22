@@ -529,8 +529,8 @@ async function runCursorJson(
 ): Promise<unknown> {
   await checkedCursorRuntimeVersion(root);
   const fullPrompt = cursorPrompt(prompt, schema, readOnly);
-  const args = cursorAgentArgs(root, options, readOnly);
-  const result = await runCursorAgent(root, args, fullPrompt);
+  const args = cursorAgentArgs(root, options, readOnly, fullPrompt);
+  const result = await runCursorAgent(root, args);
   if (result.exitCode !== 0) {
     throw new ClawpatchError(
       cursorFailureMessage(result.stdout, result.stderr, result.exitCode),
@@ -556,7 +556,12 @@ async function checkedCursorRuntimeVersion(root: string): Promise<string> {
   return appVersion === null ? version : `${version} (Cursor app ${appVersion})`;
 }
 
-function cursorAgentArgs(root: string, options: ProviderOptions, readOnly: boolean): string[] {
+function cursorAgentArgs(
+  root: string,
+  options: ProviderOptions,
+  readOnly: boolean,
+  prompt: string,
+): string[] {
   const args = ["--trust", "-p", "--output-format", "json", "--workspace", root];
   if (readOnly) {
     args.push("--mode", "ask");
@@ -564,6 +569,7 @@ function cursorAgentArgs(root: string, options: ProviderOptions, readOnly: boole
   if (options.model !== null) {
     args.push("--model", options.model);
   }
+  args.push(prompt);
   return args;
 }
 

@@ -374,6 +374,7 @@ describe("Cursor provider", () => {
         skipGitRepoCheck: true,
       },
       true,
+      "review prompt",
     );
 
     expect(args).toEqual([
@@ -387,6 +388,7 @@ describe("Cursor provider", () => {
       "ask",
       "--model",
       "cursor-model",
+      "review prompt",
     ]);
     expect(args).not.toContain("--force");
     expect(args).not.toContain("--yolo");
@@ -401,9 +403,18 @@ describe("Cursor provider", () => {
         skipGitRepoCheck: false,
       },
       false,
+      "fix prompt",
     );
 
-    expect(args).toEqual(["--trust", "-p", "--output-format", "json", "--workspace", "/repo"]);
+    expect(args).toEqual([
+      "--trust",
+      "-p",
+      "--output-format",
+      "json",
+      "--workspace",
+      "/repo",
+      "fix prompt",
+    ]);
   });
 
   it("keeps Cursor provider execution disabled by default", async () => {
