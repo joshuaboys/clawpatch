@@ -347,7 +347,7 @@ function mountedTargets(
   const mounts: MountedRouteTarget[] = [];
   const unknownMountedTargets = new Set<string>();
   const pattern = new RegExp(
-    `(^|[^A-Za-z0-9_$])([A-Za-z_$][A-Za-z0-9_$]*)\\s*\\.\\s*${method}\\s*\\(`,
+    `(^|[^A-Za-z0-9_$.])([A-Za-z_$][A-Za-z0-9_$]*)\\s*\\.\\s*${method}\\s*\\(`,
     "gu",
   );
   pattern.lastIndex = 0;
@@ -375,14 +375,16 @@ function mountedTargets(
           : singletonMountPrefix(args[0]);
     const pathlessExpressMount =
       method === "use" &&
-      (isPathlessExpressMount(source, args) || isSingleExpressChildMount(args, parent, targets));
+      (isPathlessExpressMount(source, args) || isPathlessExpressChildMount(args, parent, targets));
     const prefixes = literalPrefixes ?? (pathlessExpressMount ? ["/"] : null);
     if (prefixes === null || !prefixes.every(isMountPrefix)) {
-      const childArgs = method === "use" ? args.slice(1) : args.slice(1, 2);
-      for (const childArg of childArgs) {
-        const child = childArg.trim();
-        if (isSimpleIdentifier(child) && child !== parent && targets.has(child)) {
-          unknownMountedTargets.add(child);
+      if (method === "route" || isLikelyDynamicMountPrefix(source, args[0]?.trim() ?? "")) {
+        const childArgs = method === "use" ? args.slice(1) : args.slice(1, 2);
+        for (const childArg of childArgs) {
+          const child = childArg.trim();
+          if (isSimpleIdentifier(child) && child !== parent && targets.has(child)) {
+            unknownMountedTargets.add(child);
+          }
         }
       }
       continue;
@@ -458,16 +460,18 @@ function resolveMountedRouteTargetPrefixes(
   };
 }
 
-function isSingleExpressChildMount(
+function isPathlessExpressChildMount(
   args: string[],
   parent: string,
   targets: ReadonlySet<string>,
 ): boolean {
-  if (args.length !== 1) {
+  if (args.length === 0) {
     return false;
   }
-  const child = args[0]?.trim();
-  return child !== undefined && isSimpleIdentifier(child) && child !== parent && targets.has(child);
+  return args.every((arg) => {
+    const child = arg.trim();
+    return isSimpleIdentifier(child) && child !== parent && targets.has(child);
+  });
 }
 
 function isPathlessExpressMount(source: string, args: string[]): boolean {
@@ -475,16 +479,74 @@ function isPathlessExpressMount(source: string, args: string[]): boolean {
   if (first === undefined || standaloneStringLiteral(first) !== null) {
     return false;
   }
-  return isLikelyExpressMiddleware(first) || isDeclaredFunctionLike(source, first);
+  if (isLikelyDynamicMountPrefix(source, first)) {
+    return false;
+  }
+  return (
+    isLikelyExpressMiddleware(first) ||
+    isDeclaredFunctionLike(source, first) ||
+    (isSimpleIdentifier(first) && isImportedIdentifier(source, first))
+  );
 }
 
 function isLikelyExpressMiddleware(value: string): boolean {
   return (
     /^(?:async\s*)?(?:function\b|\([^)]*\)\s*=>|[A-Za-z_$][A-Za-z0-9_$]*\s*=>)/u.test(value) ||
-    /(?:auth|authorize|guard|middleware|handler|validate|validator|schema|session|cookie|cors|helmet|parser|logger|compress|ratelimit|limiter)/iu.test(
+    /(?:auth|authorize|guard|middleware|handler|validate|validator|schema|session|cookie|cors|helmet|parser|logger|compress|ratelimit|limiter|json|urlencoded|static)/iu.test(
       value,
     )
   );
+}
+
+function isLikelyDynamicMountPrefix(source: string, value: string): boolean {
+  if (/(?:prefix|base|path|tenant|mount|route)/iu.test(value)) {
+    return true;
+  }
+  if (!isSimpleIdentifier(value)) {
+    return false;
+  }
+  const escapedName = escapeRegExp(value);
+  const pattern = new RegExp(
+    `${declarationPrefix.replace("([A-Za-z_$][A-Za-z0-9_$]*)", escapedName)}`,
+    "gu",
+  );
+  for (const match of source.matchAll(pattern)) {
+    if (isInsideCommentOrString(source, match.index ?? 0)) {
+      continue;
+    }
+    const valueStart = (match.index ?? 0) + match[0].length;
+    const assignedValue = source.slice(valueStart, valueStart + 200).split(/[;\n]/u)[0] ?? "";
+    if (/(?:prefix|base|path|tenant|mount|route)/iu.test(assignedValue)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isImportedIdentifier(source: string, name: string): boolean {
+  const escapedName = escapeRegExp(name);
+  const patterns = [
+    new RegExp(String.raw`\bimport\s+${escapedName}\b`, "gu"),
+    new RegExp(String.raw`\bimport\s+\*\s+as\s+${escapedName}\b`, "gu"),
+    new RegExp(
+      String.raw`\bimport\s*\{[^}]*\b(?:${escapedName}|[A-Za-z_$][A-Za-z0-9_$]*\s+as\s+${escapedName})\b[^}]*\}\s*from\b`,
+      "gu",
+    ),
+    new RegExp(String.raw`\b(?:const|let|var)\s+${escapedName}\s*=\s*require\s*\(`, "gu"),
+    new RegExp(
+      String.raw`\b(?:const|let|var)\s*\{[^}]*\b(?:${escapedName}|[A-Za-z_$][A-Za-z0-9_$]*\s*:\s*${escapedName})\b[^}]*\}\s*=\s*require\s*\(`,
+      "gu",
+    ),
+  ];
+  for (const pattern of patterns) {
+    pattern.lastIndex = 0;
+    for (const match of source.matchAll(pattern)) {
+      if (!isInsideCommentOrString(source, match.index ?? 0)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function isDeclaredFunctionLike(source: string, name: string): boolean {
