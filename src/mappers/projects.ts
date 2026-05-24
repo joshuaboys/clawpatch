@@ -2,6 +2,7 @@ import { lstat, readFile, readdir, realpath } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { packageScripts, readPackageJson } from "../detect.js";
 import { pathExists } from "../fs.js";
+import { shellQuotePath } from "../shell.js";
 import { isSafeDirectory, normalize, pathMatchesPrefix, shouldSkip } from "./shared.js";
 import { taskGraphCommand, type WorkspaceTaskGraph } from "./task-graph.js";
 import type { SeedFileRef } from "./types.js";
@@ -194,22 +195,26 @@ export function packageRelativePath(packageRoot: string, path: string): string {
 }
 
 export function scriptCommand(packageManager: string, packageRoot: string, script: string): string {
+  const quotedScript = shellQuotePath(script);
   if (packageRoot === ".") {
     if (packageManager === "bun") {
-      return `bun run ${script}`;
+      return `bun run ${quotedScript}`;
     }
-    return packageManager === "npm" ? `npm run ${script}` : `${packageManager} ${script}`;
+    return packageManager === "npm"
+      ? `npm run ${quotedScript}`
+      : `${packageManager} ${quotedScript}`;
   }
+  const quotedRoot = shellQuotePath(packageRoot);
   if (packageManager === "pnpm") {
-    return `pnpm --dir ${packageRoot} ${script}`;
+    return `pnpm --dir ${quotedRoot} ${quotedScript}`;
   }
   if (packageManager === "yarn") {
-    return `yarn --cwd ${packageRoot} ${script}`;
+    return `yarn --cwd ${quotedRoot} ${quotedScript}`;
   }
   if (packageManager === "bun") {
-    return `bun --cwd ${packageRoot} run ${script}`;
+    return `bun --cwd ${quotedRoot} run ${quotedScript}`;
   }
-  return `npm --prefix ${packageRoot} run ${script}`;
+  return `npm --prefix ${quotedRoot} run ${quotedScript}`;
 }
 
 export function projectDisplayName(info: NodeProjectInfo): string {
@@ -995,11 +1000,13 @@ async function detectNodePackageManager(root: string): Promise<string> {
 }
 
 function nxCommand(packageManager: string, target: string, projectName: string): string {
+  const quotedTarget = shellQuotePath(target);
+  const quotedProjectName = shellQuotePath(projectName);
   if (packageManager === "npm") {
-    return `npx nx ${target} ${projectName}`;
+    return `npx nx ${quotedTarget} ${quotedProjectName}`;
   }
   if (packageManager === "bun") {
-    return `bunx nx ${target} ${projectName}`;
+    return `bunx nx ${quotedTarget} ${quotedProjectName}`;
   }
-  return `${packageManager} nx ${target} ${projectName}`;
+  return `${packageManager} nx ${quotedTarget} ${quotedProjectName}`;
 }

@@ -3,13 +3,26 @@ import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { detectProject } from "./detect.js";
 import { mapFeatures } from "./mapper.js";
-import { discoverNodeProjects } from "./mappers/projects.js";
+import { discoverNodeProjects, scriptCommand } from "./mappers/projects.js";
+import { nodeScriptCommand } from "./mappers/shared.js";
 import { turboTaskGraph } from "./mappers/turbo.js";
 import { fixtureRoot, writeFixture } from "./test-helpers.js";
 
 const symlinkIt = process.platform === "win32" ? it.skip : it;
 
 describe("mapFeatures", () => {
+  it("quotes dynamic Node validation command parts", () => {
+    expect(scriptCommand("pnpm", "packages/app; touch INJECTED", "test")).toBe(
+      'pnpm --dir "packages/app; touch INJECTED" test',
+    );
+    expect(scriptCommand("npm", ".", "test:unit; touch INJECTED")).toBe(
+      'npm run "test:unit; touch INJECTED"',
+    );
+    expect(nodeScriptCommand("npm", "apps/site $(touch INJECTED)", "test")).toBe(
+      'npm --prefix "apps/site \\$(touch INJECTED)" run test',
+    );
+  });
+
   it("applies configured path excludes to heuristic feature mapping", async () => {
     const root = await fixtureRoot("clawpatch-map-exclude-");
     await writeFixture(root, "requirements.txt", "pytest\n");
@@ -849,6 +862,51 @@ describe("mapFeatures", () => {
 
     expect(route?.tests).toEqual([
       { path: "apps/web/app/page.test.tsx", command: "pnpm --dir apps/web test" },
+    ]);
+  });
+
+  it("quotes workspace package roots with shell metacharacters in mapped validation commands", async () => {
+    const root = await fixtureRoot("clawpatch-task-graph-fallback-quoted-");
+    const packageRoot = "apps/web; touch INJECTED";
+    await writeFixture(
+      root,
+      "package.json",
+      JSON.stringify(
+        { name: "workspace-root", workspaces: ["apps/*"], dependencies: { next: "1.0.0" } },
+        null,
+        2,
+      ),
+    );
+    await writeFixture(root, "pnpm-lock.yaml", "");
+    await writeFixture(
+      root,
+      `${packageRoot}/package.json`,
+      JSON.stringify(
+        {
+          name: "web",
+          scripts: { test: "vitest run", build: "next build" },
+          dependencies: { next: "1.0.0" },
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFixture(
+      root,
+      `${packageRoot}/app/page.tsx`,
+      "export default function Page() { return null; }\n",
+    );
+    await writeFixture(root, `${packageRoot}/app/page.test.tsx`, "test('page', () => {});\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const route = result.features.find((feature) => feature.title === "web route /");
+
+    expect(route?.tests).toEqual([
+      {
+        path: `${packageRoot}/app/page.test.tsx`,
+        command: 'pnpm --dir "apps/web; touch INJECTED" test',
+      },
     ]);
   });
 
@@ -2424,6 +2482,55 @@ describe("mapFeatures", () => {
     expect(webSource?.tests).toEqual([
       { path: "apps/web/app/page.test.tsx", command: "pnpm turbo run test --filter web" },
     ]);
+  });
+
+  it("quotes Turbo task filters with shell metacharacters", async () => {
+    const root = await fixtureRoot("clawpatch-turbo-quoted-filter-");
+    await writeFixture(
+      root,
+      "package.json",
+      JSON.stringify(
+        {
+          name: "workspace-root",
+          packageManager: "pnpm@10.0.0",
+          workspaces: ["apps/*"],
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFixture(root, "pnpm-lock.yaml", "");
+    await writeFixture(root, "turbo.json", JSON.stringify({ tasks: { test: {} } }, null, 2));
+    await writeFixture(
+      root,
+      "apps/web/package.json",
+      JSON.stringify(
+        {
+          name: "web; touch INJECTED",
+          scripts: { test: "vitest run" },
+          dependencies: { next: "1.0.0" },
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFixture(
+      root,
+      "apps/web/app/page.tsx",
+      "export default function Page() { return null; }\n",
+    );
+    await writeFixture(root, "apps/web/app/page.test.tsx", "test('page', () => {});\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const mappedTest = result.features
+      .flatMap((feature) => feature.tests)
+      .find((test) => test.path === "apps/web/app/page.test.tsx");
+
+    expect(mappedTest).toEqual({
+      path: "apps/web/app/page.test.tsx",
+      command: 'pnpm turbo run test --filter "web; touch INJECTED"',
+    });
   });
 
   it("keeps package-local validation for fallback packages outside the workspace graph", async () => {
@@ -4970,6 +5077,42 @@ describe("mapFeatures", () => {
     ]);
     expect(android?.tests).toEqual([
       { path: "apps/android/app/src/test/java/com/example/MainActivityTest.kt", command: null },
+    ]);
+  });
+
+  it("quotes nested Swift package roots with shell metacharacters", async () => {
+    const root = await fixtureRoot("clawpatch-swift-quoted-package-path-");
+    const packageRoot = "apps/macos; touch INJECTED";
+    await writeFixture(
+      root,
+      `${packageRoot}/Package.swift`,
+      [
+        "// swift-tools-version: 6.0",
+        "import PackageDescription",
+        "let package = Package(",
+        '  name: "MacApp",',
+        '  targets: [.executableTarget(name: "MacApp"), .testTarget(name: "MacAppTests", dependencies: ["MacApp"])]',
+        ")",
+      ].join("\n"),
+    );
+    await writeFixture(root, `${packageRoot}/Sources/MacApp/main.swift`, "@main struct App {}\n");
+    await writeFixture(
+      root,
+      `${packageRoot}/Tests/MacAppTests/MacAppTests.swift`,
+      "import Testing\n",
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const mac = result.features.find((feature) =>
+      feature.title.startsWith("Swift executable MacApp"),
+    );
+
+    expect(mac?.tests).toEqual([
+      {
+        path: `${packageRoot}/Tests/MacAppTests/MacAppTests.swift`,
+        command: 'swift test --package-path "apps/macos; touch INJECTED"',
+      },
     ]);
   });
 
@@ -10797,6 +10940,26 @@ let package = Package(name: "HybridApp", targets: [.target(name: "HybridApp")])
     ]);
   });
 
+  it("quotes conventional Rust crate manifest paths with shell metacharacters", async () => {
+    const root = await fixtureRoot("clawpatch-rust-quoted-manifest-path-");
+    const memberRoot = "crates/member; touch INJECTED";
+    await writeFixture(root, "Cargo.toml", "[workspace]\n");
+    await writeFixture(root, `${memberRoot}/Cargo.toml`, '[package]\nname = "member"\n');
+    await writeFixture(root, `${memberRoot}/src/lib.rs`, "pub fn run() {}\n");
+    await writeFixture(root, `${memberRoot}/tests/member_test.rs`, "#[test]\nfn works() {}\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const library = result.features.find((feature) => feature.title === "Rust library member");
+
+    expect(library?.tests).toEqual([
+      {
+        path: `${memberRoot}/tests/member_test.rs`,
+        command: 'cargo test --manifest-path "crates/member; touch INJECTED/Cargo.toml"',
+      },
+    ]);
+  });
+
   it("bounds Rust integration tests attached to entrypoint features", async () => {
     const root = await fixtureRoot("clawpatch-rust-test-bound-");
     await writeFixture(root, "Cargo.toml", '[package]\nname = "rust-test-bound"\n');
@@ -15504,6 +15667,36 @@ end
     expect(migrations?.contextFiles.map((file) => file.path)).toEqual([
       "mix.exs",
       "lib/sample_app/repo.ex",
+    ]);
+  });
+
+  it("quotes Elixir test paths with shell metacharacters", async () => {
+    const root = await fixtureRoot("clawpatch-elixir-quoted-test-path-");
+    await writeFixture(
+      root,
+      "mix.exs",
+      'defmodule SampleApp.MixProject do\n  use Mix.Project\n  def project, do: [app: :sample_app, version: "0.1.0"]\nend\n',
+    );
+    await writeFixture(
+      root,
+      "lib/sample_app/accounts.ex",
+      "defmodule SampleApp.Accounts do\nend\n",
+    );
+    await writeFixture(
+      root,
+      "test/sample_app/accounts/injected; touch INJECTED_test.exs",
+      "defmodule SampleApp.AccountsTest do\nuse ExUnit.Case\nend\n",
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const accounts = result.features.find((feature) => feature.title === "Elixir context accounts");
+
+    expect(accounts?.tests).toEqual([
+      {
+        path: "test/sample_app/accounts/injected; touch INJECTED_test.exs",
+        command: 'mix test "test/sample_app/accounts/injected; touch INJECTED_test.exs"',
+      },
     ]);
   });
 

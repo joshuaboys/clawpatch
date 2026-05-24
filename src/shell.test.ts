@@ -21,4 +21,16 @@ describe("shellQuotePath", () => {
       '"src/\\$App/\\"Project\\".csproj"',
     );
   });
+
+  it("quotes POSIX command separators", () => {
+    expect(shellQuotePath("packages/app; touch INJECTED", "linux")).toBe(
+      '"packages/app; touch INJECTED"',
+    );
+  });
+
+  it("escapes POSIX command substitutions inside quoted paths", () => {
+    expect(shellQuotePath("packages/$(touch INJECTED)", "linux")).toBe(
+      '"packages/\\$(touch INJECTED)"',
+    );
+  });
 });

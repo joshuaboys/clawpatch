@@ -1,6 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { pathExists } from "../fs.js";
+import { shellQuotePath } from "../shell.js";
 import {
   isSafeDirectory,
   isSafeFile,
@@ -89,7 +90,7 @@ async function rustMemberDirs(root: string): Promise<RustMemberDir[]> {
     for (const member of await conventionalCrateDirs(root, workspace.excluded)) {
       dirs.set(member, {
         dir: member,
-        testCommand: `cargo test --manifest-path ${member}/Cargo.toml`,
+        testCommand: `cargo test --manifest-path ${shellQuotePath(`${member}/Cargo.toml`)}`,
       });
     }
   }
