@@ -1,6 +1,6 @@
-![clawpatch banner](docs/assets/readme-banner.jpg)
-
 # 🩹 clawpatch
+
+![clawpatch banner](docs/assets/readme-banner.jpg)
 
 Automated code review that lands fixes.
 
