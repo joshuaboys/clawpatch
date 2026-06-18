@@ -1,5 +1,4 @@
-import { readFileSync, realpathSync } from "node:fs";
-import { lstat, readFile, readdir } from "node:fs/promises";
+import { lstat, readFile, readdir, realpath } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import { pathExists } from "../fs.js";
 import {
@@ -83,17 +82,21 @@ const contextImportExtensions = new Set([
 ]);
 
 export async function reactSeeds(root: string, context: MapperContext): Promise<FeatureSeed[]> {
-  syncFileCache.clear();
   const packages = await discoverReactPackages(root, context.projects, context.taskGraph);
+  const importResolver = createReactImportResolver(root);
   const seeds: FeatureSeed[] = [];
   for (const info of packages) {
-    seeds.push(...(await routeSeeds(root, info)));
-    seeds.push(...(await componentSeeds(root, info, seeds)));
+    seeds.push(...(await routeSeeds(root, info, importResolver)));
+    seeds.push(...(await componentSeeds(root, info, seeds, importResolver)));
   }
   return seeds;
 }
 
-async function routeSeeds(root: string, info: ReactPackage): Promise<FeatureSeed[]> {
+async function routeSeeds(
+  root: string,
+  info: ReactPackage,
+  importResolver: ReactImportResolver,
+): Promise<FeatureSeed[]> {
   const files = await packageSourceFiles(root, info, sourceRoots);
   const routeFiles = files
     .filter((file) => /\.(tsx|jsx|ts|js)$/u.test(file))
@@ -113,7 +116,7 @@ async function routeSeeds(root: string, info: ReactPackage): Promise<FeatureSeed
     if (routes.length === 0) {
       continue;
     }
-    const imports = componentImports(root, file, parsedSource);
+    const imports = await componentImports(importResolver, file, parsedSource);
     for (const route of routes) {
       if (isFrameworkRouteComponent(route.component)) {
         continue;
@@ -139,7 +142,7 @@ async function routeSeeds(root: string, info: ReactPackage): Promise<FeatureSeed
           ...(entryPath === route.declarationPath
             ? []
             : [{ path: route.declarationPath, reason: "route declaration" }]),
-          ...directImportRefs(root, entryPath),
+          ...(await directImportRefs(importResolver, entryPath)),
           ...routeTests.map((test) => ({ path: test.path, reason: "associated test" })),
         ]),
         tests: routeTests,
@@ -165,6 +168,7 @@ async function componentSeeds(
   root: string,
   info: ReactPackage,
   existingSeeds: FeatureSeed[],
+  importResolver: ReactImportResolver,
 ): Promise<FeatureSeed[]> {
   const routeOwnedFiles = new Set(
     existingSeeds
@@ -179,36 +183,38 @@ async function componentSeeds(
   const testCommand = packageTestCommand(info);
   const tests = await packageTestFiles(root, info);
 
-  return componentFiles.map((file) => {
-    const componentName = basename(file).replace(/\.[^.]+$/u, "");
-    const componentTests = associatedTests([file], tests, testCommand);
-    return {
-      title: `React component ${componentName}`,
-      summary: `React component implemented by ${file}.`,
-      kind: "ui-flow",
-      source: "react-component",
-      confidence: "medium",
-      entryPath: file,
-      symbol: componentName,
-      route: null,
-      command: null,
-      ownedFiles: [{ path: file, reason: "component implementation" }],
-      contextFiles: uniqueFileRefs([
-        { path: info.packageJsonPath, reason: "package manifest" },
-        ...directImportRefs(root, file),
-        ...componentTests.map((test) => ({ path: test.path, reason: "associated test" })),
-      ]),
-      tests: componentTests,
-      tags: [
-        "react",
-        "component",
-        "web",
-        ...(info.suppressConfiguredTest ? [suppressedTestCommandTag] : []),
-      ],
-      trustBoundaries: ["user-input", "network", "serialization"],
-      skipNearbyTests: true,
-    };
-  });
+  return Promise.all(
+    componentFiles.map(async (file) => {
+      const componentName = basename(file).replace(/\.[^.]+$/u, "");
+      const componentTests = associatedTests([file], tests, testCommand);
+      return {
+        title: `React component ${componentName}`,
+        summary: `React component implemented by ${file}.`,
+        kind: "ui-flow",
+        source: "react-component",
+        confidence: "medium",
+        entryPath: file,
+        symbol: componentName,
+        route: null,
+        command: null,
+        ownedFiles: [{ path: file, reason: "component implementation" }],
+        contextFiles: uniqueFileRefs([
+          { path: info.packageJsonPath, reason: "package manifest" },
+          ...(await directImportRefs(importResolver, file)),
+          ...componentTests.map((test) => ({ path: test.path, reason: "associated test" })),
+        ]),
+        tests: componentTests,
+        tags: [
+          "react",
+          "component",
+          "web",
+          ...(info.suppressConfiguredTest ? [suppressedTestCommandTag] : []),
+        ],
+        trustBoundaries: ["user-input", "network", "serialization"],
+        skipNearbyTests: true,
+      };
+    }),
+  );
 }
 
 async function discoverReactPackages(
@@ -1087,7 +1093,11 @@ function joinReactRoutePaths(parent: string, child: string): string {
   return `${parent.replace(/\/$/u, "")}/${child.replace(/^\//u, "")}`;
 }
 
-function componentImports(root: string, fromPath: string, source: string): Map<string, string> {
+async function componentImports(
+  resolver: ReactImportResolver,
+  fromPath: string,
+  source: string,
+): Promise<Map<string, string>> {
   const imports = new Map<string, string>();
   for (const match of source.matchAll(lazyImportRe)) {
     const component = match[1];
@@ -1099,7 +1109,7 @@ function componentImports(root: string, fromPath: string, source: string): Map<s
     ) {
       continue;
     }
-    const resolved = resolveImport(root, fromPath, importPath);
+    const resolved = await resolver.resolveImport(fromPath, importPath);
     if (resolved !== null) {
       imports.set(component, resolved);
     }
@@ -1114,7 +1124,7 @@ function componentImports(root: string, fromPath: string, source: string): Map<s
     ) {
       continue;
     }
-    const resolved = resolveImport(root, fromPath, importPath);
+    const resolved = await resolver.resolveImport(fromPath, importPath);
     if (resolved !== null) {
       imports.set(component, resolved);
     }
@@ -1129,7 +1139,7 @@ function componentImports(root: string, fromPath: string, source: string): Map<s
     ) {
       continue;
     }
-    const resolved = resolveImport(root, fromPath, importPath);
+    const resolved = await resolver.resolveImport(fromPath, importPath);
     if (resolved === null) {
       continue;
     }
@@ -1151,12 +1161,11 @@ function importedNames(importList: string): string[] {
     });
 }
 
-function directImportRefs(root: string, path: string): SeedFileRef[] {
-  const fullPath = join(root, path);
-  if (!pathExistsSyncMemo(fullPath)) {
-    return [];
-  }
-  const rawSource = readFileSyncMemo(fullPath);
+async function directImportRefs(
+  resolver: ReactImportResolver,
+  path: string,
+): Promise<SeedFileRef[]> {
+  const rawSource = await resolver.readSource(path);
   if (rawSource === null) {
     return [];
   }
@@ -1171,7 +1180,7 @@ function directImportRefs(root: string, path: string): SeedFileRef[] {
     ) {
       continue;
     }
-    const resolved = resolveImport(root, path, importPath);
+    const resolved = await resolver.resolveImport(path, importPath);
     if (resolved !== null) {
       refs.push({ path: resolved, reason: "direct import" });
     }
@@ -1209,55 +1218,55 @@ function isLikelyJsxTextQuote(source: string, index: number): boolean {
   return !source.slice(lastTagEnd + 1, index).includes("{");
 }
 
-const syncFileCache = new Map<string, string | null>();
+type ReactImportResolver = {
+  readSource: (path: string) => Promise<string | null>;
+  resolveImport: (fromPath: string, importPath: string) => Promise<string | null>;
+};
 
-function pathExistsSyncMemo(path: string): boolean {
-  return readFileSyncMemo(path) !== null;
-}
-
-function readFileSyncMemo(path: string): string | null {
-  if (syncFileCache.has(path)) {
-    return syncFileCache.get(path) ?? null;
-  }
-  try {
-    const source = readFileSync(path, "utf8");
-    syncFileCache.set(path, source);
-    return source;
-  } catch {
-    syncFileCache.set(path, null);
-    return null;
-  }
-}
-
-function resolveImport(root: string, fromPath: string, importPath: string): string | null {
-  if (!importPath.startsWith(".")) {
-    return null;
-  }
-  const base = join(dirname(fromPath), importPath);
-  const candidates = [
-    base,
-    `${base}.tsx`,
-    `${base}.ts`,
-    `${base}.jsx`,
-    `${base}.js`,
-    `${base}.css`,
-    join(base, "index.tsx"),
-    join(base, "index.ts"),
-    join(base, "index.jsx"),
-    join(base, "index.js"),
-  ];
-  for (const candidate of candidates.map(normalize).filter(isTextContextImportCandidate)) {
-    const fullPath = join(root, candidate);
-    if (
-      !shouldSkip(candidate) &&
-      pathInsideRoot(root, fullPath) &&
-      realPathInsideRoot(root, fullPath) &&
-      pathExistsSyncMemo(fullPath)
-    ) {
-      return candidate;
+function createReactImportResolver(root: string): ReactImportResolver {
+  const sourceCache = new Map<string, Promise<string | null>>();
+  const realRoot = realpath(root).catch(() => root);
+  const readSource = (path: string): Promise<string | null> => {
+    let pending = sourceCache.get(path);
+    if (pending === undefined) {
+      pending = readFile(join(root, path), "utf8").catch(() => null);
+      sourceCache.set(path, pending);
     }
-  }
-  return null;
+    return pending;
+  };
+  return {
+    readSource,
+    async resolveImport(fromPath, importPath) {
+      if (!importPath.startsWith(".")) {
+        return null;
+      }
+      const base = join(dirname(fromPath), importPath);
+      const candidates = [
+        base,
+        `${base}.tsx`,
+        `${base}.ts`,
+        `${base}.jsx`,
+        `${base}.js`,
+        `${base}.css`,
+        join(base, "index.tsx"),
+        join(base, "index.ts"),
+        join(base, "index.jsx"),
+        join(base, "index.js"),
+      ];
+      for (const candidate of candidates.map(normalize).filter(isTextContextImportCandidate)) {
+        const fullPath = join(root, candidate);
+        if (
+          !shouldSkip(candidate) &&
+          pathInsideRoot(root, fullPath) &&
+          (await realPathInsideRootPath(await realRoot, fullPath)) &&
+          (await readSource(candidate)) !== null
+        ) {
+          return candidate;
+        }
+      }
+      return null;
+    },
+  };
 }
 
 function isTextContextImportCandidate(path: string): boolean {
@@ -1265,12 +1274,17 @@ function isTextContextImportCandidate(path: string): boolean {
   return extension.length === 0 || contextImportExtensions.has(extension);
 }
 
-function realPathInsideRoot(root: string, path: string): boolean {
-  try {
-    return pathInsideRoot(realpathSync(root), realpathSync(path));
-  } catch {
-    return false;
-  }
+async function realPathInsideRoot(root: string, path: string): Promise<boolean> {
+  const [realRoot, realFile] = await Promise.all([
+    realpath(root).catch(() => null),
+    realpath(path).catch(() => null),
+  ]);
+  return realRoot !== null && realFile !== null && pathInsideRoot(realRoot, realFile);
+}
+
+async function realPathInsideRootPath(realRoot: string, path: string): Promise<boolean> {
+  const realFile = await realpath(path).catch(() => null);
+  return realFile !== null && pathInsideRoot(realRoot, realFile);
 }
 
 function associatedTests(files: string[], tests: string[], command: string | null): SeedTestRef[] {
@@ -1356,7 +1370,11 @@ async function readPackageJsonAt(root: string, path: string): Promise<PackageJso
 
 async function safeFile(root: string, path: string): Promise<boolean> {
   const fullPath = join(root, path);
-  if (shouldSkip(path) || !(await pathExists(fullPath)) || !realPathInsideRoot(root, fullPath)) {
+  if (
+    shouldSkip(path) ||
+    !(await pathExists(fullPath)) ||
+    !(await realPathInsideRoot(root, fullPath))
+  ) {
     return false;
   }
   const info = await lstat(fullPath);
