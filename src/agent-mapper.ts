@@ -6,6 +6,7 @@ import { AgentMapOutput, FeatureRecord, ProjectRecord } from "./types.js";
 import { pathExists } from "./fs.js";
 import { runCommandArgs } from "./exec.js";
 import { mapFeatureSeeds, MapResult } from "./mapper.js";
+import { dedupeFeatureSeeds, stableFeatureJson } from "./mapper-reconciliation.js";
 import { FeatureSeed, SeedFileRef, SeedTestRef } from "./mappers/types.js";
 import {
   applyPathFilters,
@@ -220,7 +221,9 @@ async function agentMap(
   const seeds = await Promise.all(
     output.features.map((feature) => toSeed(root, feature, inventory.allFiles)),
   );
-  const mappedSeeds = uniqueSeeds(seeds.filter((seed): seed is FeatureSeed => seed !== null));
+  const mappedSeeds = dedupeFeatureSeeds(
+    seeds.filter((seed): seed is FeatureSeed => seed !== null),
+  );
   return filters === undefined
     ? mapFeatureSeeds(root, project, existing, mappedSeeds)
     : mapFeatureSeeds(root, project, existing, mappedSeeds, { filters });
@@ -267,25 +270,6 @@ async function toSeed(
   };
 }
 
-function uniqueSeeds(seeds: FeatureSeed[]): FeatureSeed[] {
-  const seen = new Set<string>();
-  const output: FeatureSeed[] = [];
-  for (const seed of seeds) {
-    const key = [
-      seed.kind,
-      seed.source,
-      seed.entryPath,
-      seed.identityKey ?? seed.command ?? seed.route ?? seed.symbol ?? "",
-    ].join("\0");
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    output.push(seed);
-  }
-  return output;
-}
-
 function agentIdentityKey(entrypoint: string, ownedFiles: SeedFileRef[]): string {
   return uniqueStrings([entrypoint, ...ownedFiles.map((file) => file.path)])
     .toSorted()
@@ -315,17 +299,6 @@ function mergeMapResults(
     }).length,
     stale: existing.filter((feature) => !byId.has(feature.featureId)).length,
   };
-}
-
-function stableFeatureJson(feature: FeatureRecord): string {
-  const {
-    createdAt: _createdAt,
-    updatedAt: _updatedAt,
-    lock: _lock,
-    analysisHistory: _analysisHistory,
-    ...stable
-  } = feature;
-  return JSON.stringify(stable);
 }
 
 async function validFileRefs(

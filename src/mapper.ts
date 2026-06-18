@@ -1,5 +1,10 @@
 import { nowIso } from "./fs.js";
 import { stableId } from "./id.js";
+import {
+  dedupeFeatureSeeds,
+  seedIdentityParts,
+  stableFeatureJson,
+} from "./mapper-reconciliation.js";
 import { cCppSeeds } from "./mappers/c-cpp.js";
 import { configSeeds } from "./mappers/config.js";
 import { dotnetSeeds } from "./mappers/dotnet.js";
@@ -143,8 +148,7 @@ export async function mapFeatureSeeds(
       updatedAt: now,
     };
     const featureChanged =
-      previous !== undefined &&
-      JSON.stringify(stripVolatile(previous)) !== JSON.stringify(stripVolatile(feature));
+      previous !== undefined && stableFeatureJson(previous) !== stableFeatureJson(feature);
     if (featureChanged) {
       feature.status = statusForChangedFeature(previous.status);
     } else if (previous?.status === "skipped") {
@@ -157,13 +161,12 @@ export async function mapFeatureSeeds(
     }
     features.push(feature);
   }
+  const mappedIds = new Set(features.map((feature) => feature.featureId));
   return {
     features,
     created,
     changed,
-    stale: existing.filter(
-      (feature) => !features.some((mapped) => mapped.featureId === feature.featureId),
-    ).length,
+    stale: existing.filter((feature) => !mappedIds.has(feature.featureId)).length,
   };
 }
 
@@ -220,12 +223,7 @@ function featureIdentity(
 ): { featureId: string; symbol: string | null } {
   const symbol = effectiveSymbol(seed, existingById);
   return {
-    featureId: stableId("feat", [
-      seed.kind,
-      seed.source,
-      seed.entryPath,
-      seed.identityKey ?? seed.command ?? seed.route ?? symbol ?? "",
-    ]),
+    featureId: stableId("feat", seedIdentityParts(seed, symbol)),
     symbol,
   };
 }
@@ -307,34 +305,7 @@ async function collectSeeds(root: string, options: MapOptions): Promise<FeatureS
       return seeds;
     }),
   );
-  return dedupeSeeds(groups.flat());
-}
-
-function dedupeSeeds(seeds: FeatureSeed[]): FeatureSeed[] {
-  const seen = new Set<string>();
-  const output: FeatureSeed[] = [];
-  for (const seed of seeds) {
-    const key = `${seed.kind}:${seed.source}:${seed.entryPath}:${seed.identityKey ?? seed.command ?? seed.route ?? seed.symbol ?? ""}`;
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    output.push(seed);
-  }
-  return output;
-}
-
-function stripVolatile(
-  feature: FeatureRecord,
-): Omit<FeatureRecord, "createdAt" | "updatedAt" | "lock" | "analysisHistory"> {
-  const {
-    createdAt: _createdAt,
-    updatedAt: _updatedAt,
-    lock: _lock,
-    analysisHistory: _analysisHistory,
-    ...stable
-  } = feature;
-  return stable;
+  return dedupeFeatureSeeds(groups.flat());
 }
 
 function statusForChangedFeature(status: FeatureRecord["status"]): FeatureRecord["status"] {
