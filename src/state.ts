@@ -164,7 +164,7 @@ export async function readFindings(paths: StatePaths): Promise<FindingRecord[]> 
 }
 
 export async function readFinding(paths: StatePaths, id: string): Promise<FindingRecord | null> {
-  const path = join(paths.findings, `${id}.json`);
+  const path = recordPath(paths.findings, id);
   if (!(await pathExists(path))) {
     return null;
   }
@@ -172,11 +172,11 @@ export async function readFinding(paths: StatePaths, id: string): Promise<Findin
 }
 
 export async function writeFinding(paths: StatePaths, finding: FindingRecord): Promise<void> {
-  await writeJson(join(paths.findings, `${finding.findingId}.json`), finding);
+  await writeJson(recordPath(paths.findings, finding.findingId), finding);
 }
 
 export async function writeRun(paths: StatePaths, run: RunRecord): Promise<void> {
-  await writeJson(join(paths.runs, `${run.runId}.json`), run);
+  await writeJson(recordPath(paths.runs, run.runId), run);
 }
 
 export async function readRuns(paths: StatePaths): Promise<RunRecord[]> {
@@ -184,7 +184,7 @@ export async function readRuns(paths: StatePaths): Promise<RunRecord[]> {
 }
 
 export async function writePatchAttempt(paths: StatePaths, patch: PatchAttempt): Promise<void> {
-  await writeJson(join(paths.patches, `${patch.patchAttemptId}.json`), patch);
+  await writeJson(recordPath(paths.patches, patch.patchAttemptId), patch);
 }
 
 export async function readPatchAttempts(paths: StatePaths): Promise<PatchAttempt[]> {
@@ -207,11 +207,18 @@ async function readRecords<T>(dir: string, schema: z.ZodType<T>): Promise<T[]> {
 }
 
 function featurePath(paths: StatePaths, featureId: string): string {
-  return join(paths.features, `${featureId}.json`);
+  return recordPath(paths.features, featureId);
 }
 
 function featureLockPath(paths: StatePaths, featureId: string): string {
-  return join(paths.locks, `${featureId}.json`);
+  return recordPath(paths.locks, featureId);
+}
+
+function recordPath(directory: string, id: string): string {
+  if (id.length === 0 || id === "." || id === ".." || /[\\/]/u.test(id) || id.includes("\0")) {
+    throw new ClawpatchError(`invalid record id: ${id}`, 2, "invalid-input");
+  }
+  return join(directory, `${id}.json`);
 }
 
 function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoException {
