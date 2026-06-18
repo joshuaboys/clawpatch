@@ -1,9 +1,35 @@
 import { describe, expect, it } from "vitest";
 import { defaultConfig } from "./config.js";
+import { ClawpatchError } from "./errors.js";
 import type { ReviewPromptManifest } from "./prompt.js";
-import { validateReviewOutput, validateReviewOutputPartitioned } from "./review-validation.js";
+import { validateReviewOutputPartitioned as validatePartitioned } from "./review-validation.js";
 import { fixtureRoot, writeFixture } from "./test-helpers.js";
 import type { FeatureRecord, ReviewOutput } from "./types.js";
+
+async function validateReviewOutput(
+  root: string,
+  _feature: FeatureRecord,
+  _config: ReturnType<typeof defaultConfig>,
+  reviewManifest: ReviewPromptManifest,
+  providerOutput: ReviewOutput,
+): Promise<ReviewOutput> {
+  const result = await validatePartitioned(root, reviewManifest, providerOutput);
+  const dropped = result.droppedFindings[0];
+  if (dropped !== undefined) {
+    throw new ClawpatchError(dropped.message, 8, "malformed-output");
+  }
+  return { ...providerOutput, findings: result.findings };
+}
+
+async function validateReviewOutputPartitioned(
+  root: string,
+  _feature: FeatureRecord,
+  _config: ReturnType<typeof defaultConfig>,
+  reviewManifest: ReviewPromptManifest,
+  providerOutput: ReviewOutput,
+) {
+  return validatePartitioned(root, reviewManifest, providerOutput);
+}
 
 describe("validateReviewOutput", () => {
   it("accepts evidence that points at included files, existing lines, and matching quotes", async () => {

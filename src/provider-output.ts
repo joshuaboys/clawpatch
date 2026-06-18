@@ -1,6 +1,7 @@
 import { z, type ZodError, type ZodIssue, type ZodType } from "zod";
 import { ClawpatchError } from "./errors.js";
 import type { DroppedFinding, PartitionedReviewOutput } from "./provider-types.js";
+import { providerSample } from "./provider-sample.js";
 import {
   type ReviewFinding,
   reviewFindingSchema,
@@ -129,19 +130,6 @@ const reviewContainerSchema = z.object({
   inspected: reviewInspectedSchema,
 });
 
-function truncateSample(value: unknown): string {
-  let text: string;
-  try {
-    text = JSON.stringify(value);
-  } catch {
-    text = String(value);
-  }
-  if (text === undefined) {
-    text = String(value);
-  }
-  return text.length > 200 ? `${text.slice(0, 197)}...` : text;
-}
-
 export function parseReviewOutput(output: unknown): PartitionedReviewOutput {
   const whole = reviewOutputSchema.safeParse(output);
   if (whole.success) {
@@ -181,7 +169,7 @@ export function parseReviewOutput(output: unknown): PartitionedReviewOutput {
     droppedFindings.push({
       path: ["findings", index, ...issuePath],
       message: issue?.message ?? "invalid finding shape",
-      sample: truncateSample(candidate),
+      sample: providerSample(candidate),
       layer: "schema",
     });
   });

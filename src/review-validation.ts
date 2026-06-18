@@ -3,33 +3,13 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { ClawpatchError } from "./errors.js";
 import { REVIEW_PROMPT_FILE_CHAR_LIMIT, type ReviewPromptManifest } from "./prompt.js";
 import type { DroppedFinding } from "./provider-types.js";
+import { providerSample } from "./provider-sample.js";
 import {
   evaluateFindingForDrop,
   type RegistryVerdict,
   type RegistryVerifierOptions,
 } from "./registry-verifier.js";
-import { ClawpatchConfig, FeatureRecord, ReviewOutput } from "./types.js";
-
-export async function validateReviewOutput(
-  root: string,
-  feature: FeatureRecord,
-  config: ClawpatchConfig,
-  manifest: ReviewPromptManifest,
-  output: ReviewOutput,
-): Promise<ReviewOutput> {
-  void feature;
-  void config;
-  const included = includedReviewPaths(manifest);
-  const promptFiles = new Map(
-    manifest.includedFiles.map((file) => [normalizePath(file.path), file]),
-  );
-  const cache = new Map<string, Promise<string>>();
-  const findings = output.findings;
-  for (const finding of findings) {
-    await validateFinding(root, finding, included, promptFiles, cache);
-  }
-  return { ...output, findings };
-}
+import { ReviewOutput } from "./types.js";
 
 /**
  * Optional post-validation hook: receives a finding that has already
@@ -56,23 +36,18 @@ export type ValidatePartitionedOptions = {
 };
 
 /**
- * Same evidence validation as {@link validateReviewOutput}, but runs
- * per-finding and partitions failures instead of throwing on the first
- * bad finding. Callers receive only the validated findings plus a list
+ * Runs evidence validation per finding and partitions failures instead
+ * of throwing on the first bad finding. Callers receive only the validated findings plus a list
  * of {@link DroppedFinding}s describing why each rejection occurred. The
  * caller is then free to surface drops as non-fatal run errors instead
  * of losing the whole feature.
  */
 export async function validateReviewOutputPartitioned(
   root: string,
-  feature: FeatureRecord,
-  config: ClawpatchConfig,
   manifest: ReviewPromptManifest,
   output: ReviewOutput,
   options: ValidatePartitionedOptions = {},
 ): Promise<{ findings: ReviewOutput["findings"]; droppedFindings: DroppedFinding[] }> {
-  void feature;
-  void config;
   const included = includedReviewPaths(manifest);
   const promptFiles = new Map(
     manifest.includedFiles.map((file) => [normalizePath(file.path), file]),
@@ -89,7 +64,7 @@ export async function validateReviewOutputPartitioned(
         droppedFindings.push({
           path: ["findings", idx],
           message: error.message.replace(/^malformed provider review output:\s*/u, ""),
-          sample: truncateValidationSample(finding),
+          sample: providerSample(finding),
           layer: "validation",
         });
         continue;
@@ -102,7 +77,7 @@ export async function validateReviewOutputPartitioned(
         droppedFindings.push({
           path: ["findings", idx],
           message: verdict.dropReason,
-          sample: truncateValidationSample(finding),
+          sample: providerSample(finding),
           layer: "registry-verifier",
         });
         continue;
@@ -153,19 +128,6 @@ async function validateFinding(
     assertLineRange(contents, evidence, promptFile);
     assertQuote(contents, evidence);
   }
-}
-
-function truncateValidationSample(finding: ReviewOutput["findings"][number]): string {
-  let text: string;
-  try {
-    text = JSON.stringify(finding);
-  } catch {
-    text = String(finding);
-  }
-  if (text === undefined) {
-    text = String(finding);
-  }
-  return text.length > 200 ? `${text.slice(0, 197)}...` : text;
 }
 
 function includedReviewPaths(manifest: ReviewPromptManifest): Set<string> {

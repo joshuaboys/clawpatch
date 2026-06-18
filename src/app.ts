@@ -763,8 +763,6 @@ async function reviewFeature(
     }
     const validated = await validateReviewOutputPartitioned(
       loaded.root,
-      lockedFeature,
-      config,
       reviewPrompt.manifest,
       reviewOutput,
       validatePartitionedOptions,
