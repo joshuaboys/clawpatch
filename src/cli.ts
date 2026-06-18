@@ -120,18 +120,22 @@ type Flags = Record<string, string | boolean>;
 type CommandContext = Awaited<ReturnType<typeof makeContext>>;
 type CommandSpec = {
   flags: readonly string[];
+  usage: readonly string[];
   required?: readonly string[];
+  helpOverrides?: Readonly<Record<string, string>>;
+  globalHelp?: readonly string[];
   validate?: (flags: Flags) => void;
   run: (context: CommandContext, flags: Flags) => Promise<unknown>;
 };
 
 const commandSpecs = {
-  init: { flags: ["force"], run: initCommand },
+  init: { flags: ["force"], usage: ["clawpatch init [flags]"], run: initCommand },
   map: {
     flags: ["dryRun", "source", "provider", "model", "reasoningEffort", "skipGitRepoCheck"],
+    usage: ["clawpatch map [flags]"],
     run: mapCommand,
   },
-  status: { flags: [], run: statusCommand },
+  status: { flags: [], usage: ["clawpatch status [flags]"], run: statusCommand },
   review: {
     flags: [
       "feature",
@@ -152,6 +156,8 @@ const commandSpecs = {
       "includeDirty",
       "noRegistryVerify",
     ],
+    usage: ["clawpatch review [flags]"],
+    globalHelp: ["json", "quiet"],
     validate: validateReviewFlags,
     run: reviewCommand,
   },
@@ -169,26 +175,47 @@ const commandSpecs = {
       "includeDirty",
       "noRegistryVerify",
     ],
+    usage: ["clawpatch ci [flags]"],
+    helpOverrides: {
+      noRegistryVerify: "  --no-registry-verify    see clawpatch review --help for details",
+    },
     run: ciCommand,
   },
   report: {
     flags: ["status", "severity", "feature", "project", "category", "triage", "output"],
+    usage: ["clawpatch report [flags]"],
     run: reportCommand,
   },
-  show: { flags: ["finding"], required: ["finding"], run: showCommand },
-  next: { flags: ["status", "project"], run: nextCommand },
+  show: {
+    flags: ["finding"],
+    usage: ["clawpatch show --finding <id> [flags]"],
+    required: ["finding"],
+    run: showCommand,
+  },
+  next: {
+    flags: ["status", "project"],
+    usage: ["clawpatch next [flags]"],
+    helpOverrides: { status: "  --status <status>  default: open" },
+    run: nextCommand,
+  },
   triage: {
     flags: ["finding", "status", "note"],
+    usage: ["clawpatch triage --finding <id> --status <status> [flags]"],
     required: ["finding", "status"],
+    helpOverrides: {
+      status: "  --status <open|false-positive|fixed|wont-fix|uncertain>",
+    },
     run: triageCommand,
   },
   fix: {
     flags: ["finding", "provider", "model", "reasoningEffort", "skipGitRepoCheck", "dryRun"],
+    usage: ["clawpatch fix --finding <id> [flags]"],
     required: ["finding"],
     run: fixCommand,
   },
   "open-pr": {
     flags: ["patch", "base", "branch", "title", "draft", "dryRun", "force"],
+    usage: ["clawpatch open-pr --patch <id> [flags]"],
     required: ["patch"],
     run: openPrCommand,
   },
@@ -209,79 +236,170 @@ const commandSpecs = {
       "skipGitRepoCheck",
       "includeDirty",
     ],
+    usage: [
+      "clawpatch revalidate --finding <id> [flags]",
+      "clawpatch revalidate --since <ref> [flags]",
+    ],
     validate: validateRevalidateFlags,
     run: revalidateCommand,
   },
-  doctor: { flags: ["provider", "model", "reasoningEffort"], run: doctorCommand },
-  "clean-locks": { flags: [], run: cleanLocksCommand },
+  doctor: {
+    flags: ["provider", "model", "reasoningEffort"],
+    usage: ["clawpatch doctor [flags]"],
+    run: doctorCommand,
+  },
+  "clean-locks": {
+    flags: [],
+    usage: ["clawpatch clean-locks [flags]"],
+    run: cleanLocksCommand,
+  },
 } satisfies Record<string, CommandSpec>;
 
 type OptionSpec = {
   name: string;
   kind: "value" | "boolean";
   target: "global" | "command";
+  help: string;
 };
 
 const optionSpecs: Record<string, OptionSpec> = {
-  root: { name: "root", kind: "value", target: "global" },
-  "state-dir": { name: "stateDir", kind: "value", target: "global" },
-  config: { name: "config", kind: "value", target: "global" },
-  json: { name: "json", kind: "boolean", target: "global" },
-  plain: { name: "plain", kind: "boolean", target: "global" },
-  quiet: { name: "quiet", kind: "boolean", target: "global" },
-  verbose: { name: "verbose", kind: "boolean", target: "global" },
-  debug: { name: "debug", kind: "boolean", target: "global" },
-  "no-color": { name: "noColor", kind: "boolean", target: "global" },
-  "no-input": { name: "noInput", kind: "boolean", target: "global" },
-  feature: { name: "feature", kind: "value", target: "command" },
-  "feature-list": { name: "featureList", kind: "value", target: "command" },
-  finding: { name: "finding", kind: "value", target: "command" },
-  limit: { name: "limit", kind: "value", target: "command" },
-  since: { name: "since", kind: "value", target: "command" },
-  jobs: { name: "jobs", kind: "value", target: "command" },
-  mode: { name: "mode", kind: "value", target: "command" },
+  root: { name: "root", kind: "value", target: "global", help: "  --root <path>" },
+  "state-dir": {
+    name: "stateDir",
+    kind: "value",
+    target: "global",
+    help: "  --state-dir <path>",
+  },
+  config: { name: "config", kind: "value", target: "global", help: "  --config <path>" },
+  json: { name: "json", kind: "boolean", target: "global", help: "  --json" },
+  plain: { name: "plain", kind: "boolean", target: "global", help: "  --plain" },
+  quiet: { name: "quiet", kind: "boolean", target: "global", help: "  -q, --quiet" },
+  verbose: { name: "verbose", kind: "boolean", target: "global", help: "  -v, --verbose" },
+  debug: { name: "debug", kind: "boolean", target: "global", help: "  --debug" },
+  "no-color": {
+    name: "noColor",
+    kind: "boolean",
+    target: "global",
+    help: "  --no-color",
+  },
+  "no-input": {
+    name: "noInput",
+    kind: "boolean",
+    target: "global",
+    help: "  --no-input",
+  },
+  feature: { name: "feature", kind: "value", target: "command", help: "  --feature <id>" },
+  "feature-list": {
+    name: "featureList",
+    kind: "value",
+    target: "command",
+    help: "  --feature-list <path>",
+  },
+  finding: { name: "finding", kind: "value", target: "command", help: "  --finding <id>" },
+  limit: { name: "limit", kind: "value", target: "command", help: "  --limit <n>" },
+  since: { name: "since", kind: "value", target: "command", help: "  --since <ref>" },
+  jobs: {
+    name: "jobs",
+    kind: "value",
+    target: "command",
+    help: "  --jobs <n>        default: ~half of CPU cores, max 10",
+  },
+  mode: {
+    name: "mode",
+    kind: "value",
+    target: "command",
+    help: "  --mode <default|deslopify>",
+  },
   "rate-limit-per-minute": {
     name: "rateLimitPerMinute",
     kind: "value",
     target: "command",
+    help: "  --rate-limit-per-minute <n>   cap provider calls per 60s window (env: CLAWPATCH_RPM)",
   },
-  source: { name: "source", kind: "value", target: "command" },
-  provider: { name: "provider", kind: "value", target: "command" },
-  model: { name: "model", kind: "value", target: "command" },
-  "reasoning-effort": { name: "reasoningEffort", kind: "value", target: "command" },
-  "prompt-file": { name: "promptFile", kind: "value", target: "command" },
+  source: {
+    name: "source",
+    kind: "value",
+    target: "command",
+    help: "  --source <heuristic|auto|agent>",
+  },
+  provider: {
+    name: "provider",
+    kind: "value",
+    target: "command",
+    help: "  --provider <name>",
+  },
+  model: { name: "model", kind: "value", target: "command", help: "  --model <name>" },
+  "reasoning-effort": {
+    name: "reasoningEffort",
+    kind: "value",
+    target: "command",
+    help: "  --reasoning-effort <none|minimal|low|medium|high|xhigh>",
+  },
+  "prompt-file": {
+    name: "promptFile",
+    kind: "value",
+    target: "command",
+    help: '  --prompt-file <path>    appends extra reviewer guidance to the prompt;\n                          use "-" to read from stdin',
+  },
   "export-tribunal-ledger": {
     name: "exportTribunalLedger",
     kind: "value",
     target: "command",
+    help: "  --export-tribunal-ledger <path>\n                          after the review completes, emit a single\n                          JSONL file with one line per finding shaped\n                          for downstream Tribunal-style signed-ledger\n                          ingest. Opt-in; no effect when omitted.",
   },
-  output: { name: "output", kind: "value", target: "command" },
-  status: { name: "status", kind: "value", target: "command" },
-  severity: { name: "severity", kind: "value", target: "command" },
-  category: { name: "category", kind: "value", target: "command" },
-  triage: { name: "triage", kind: "value", target: "command" },
-  project: { name: "project", kind: "value", target: "command" },
-  note: { name: "note", kind: "value", target: "command" },
-  patch: { name: "patch", kind: "value", target: "command" },
-  base: { name: "base", kind: "value", target: "command" },
-  branch: { name: "branch", kind: "value", target: "command" },
-  title: { name: "title", kind: "value", target: "command" },
-  "dry-run": { name: "dryRun", kind: "boolean", target: "command" },
+  output: { name: "output", kind: "value", target: "command", help: "  --output <path>" },
+  status: { name: "status", kind: "value", target: "command", help: "  --status <status>" },
+  severity: {
+    name: "severity",
+    kind: "value",
+    target: "command",
+    help: "  --severity <severity>",
+  },
+  category: {
+    name: "category",
+    kind: "value",
+    target: "command",
+    help: "  --category <category>",
+  },
+  triage: { name: "triage", kind: "value", target: "command", help: "  --triage <triage>" },
+  project: {
+    name: "project",
+    kind: "value",
+    target: "command",
+    help: "  --project <name-or-root>",
+  },
+  note: { name: "note", kind: "value", target: "command", help: "  --note <text>" },
+  patch: { name: "patch", kind: "value", target: "command", help: "  --patch <id>" },
+  base: { name: "base", kind: "value", target: "command", help: "  --base <branch>" },
+  branch: { name: "branch", kind: "value", target: "command", help: "  --branch <branch>" },
+  title: { name: "title", kind: "value", target: "command", help: "  --title <title>" },
+  "dry-run": { name: "dryRun", kind: "boolean", target: "command", help: "  --dry-run" },
   "skip-git-repo-check": {
     name: "skipGitRepoCheck",
     kind: "boolean",
     target: "command",
+    help: "  --skip-git-repo-check",
   },
-  force: { name: "force", kind: "boolean", target: "command" },
-  all: { name: "all", kind: "boolean", target: "command" },
-  draft: { name: "draft", kind: "boolean", target: "command" },
-  "include-dirty": { name: "includeDirty", kind: "boolean", target: "command" },
+  force: { name: "force", kind: "boolean", target: "command", help: "  --force" },
+  all: { name: "all", kind: "boolean", target: "command", help: "  --all" },
+  draft: { name: "draft", kind: "boolean", target: "command", help: "  --draft" },
+  "include-dirty": {
+    name: "includeDirty",
+    kind: "boolean",
+    target: "command",
+    help: "  --include-dirty",
+  },
   "no-registry-verify": {
     name: "noRegistryVerify",
     kind: "boolean",
     target: "command",
+    help: '  --no-registry-verify    disable a configured npm-registry post-validator that\n                          drops findings whose "package X@Y is\n                          unpublished" claim is refuted by the registry.\n                          Set registryVerifier.enabled=true in config.json\n                          to opt in; this flag disables it for one run.',
   },
 };
+
+const optionSpecsByName = new Map(
+  Object.values(optionSpecs).map((option) => [option.name, option] as const),
+);
 
 const shortOptionSpecs: Record<string, OptionSpec> = {
   "-q": optionSpecs["quiet"]!,
@@ -439,285 +557,63 @@ function writeResult(result: unknown, options: GlobalOptions): void {
   process.stdout.write(`${String(result)}\n`);
 }
 
+export function helpText(command = ""): string {
+  if (isKnownCommand(command)) {
+    const spec: CommandSpec = commandSpecs[command];
+    const flagLines = [
+      ...spec.flags.map((flag) => spec.helpOverrides?.[flag] ?? optionHelp(flag)),
+      ...(spec.globalHelp ?? ["json"]).map(optionHelp),
+    ];
+    return [
+      `clawpatch ${command}`,
+      "",
+      "Usage:",
+      ...spec.usage.map((usage) => `  ${usage}`),
+      "",
+      "Flags:",
+      ...flagLines,
+      "",
+    ].join("\n");
+  }
+  const globalFlags = [
+    "root",
+    "stateDir",
+    "config",
+    "json",
+    "plain",
+    "quiet",
+    "verbose",
+    "debug",
+    "noColor",
+    "noInput",
+  ].map(optionHelp);
+  return [
+    "clawpatch: automated code review that lands fixes",
+    "",
+    "Usage:",
+    "  clawpatch [global flags] <command> [flags]",
+    "",
+    "Commands:",
+    ...Object.keys(commandSpecs).map((name) => `  ${name}`),
+    "",
+    "Global flags:",
+    ...globalFlags,
+    "  -h, --help",
+    "  --version",
+    "",
+  ].join("\n");
+}
+
+function optionHelp(name: string): string {
+  const option = optionSpecsByName.get(name);
+  if (option === undefined) {
+    throw new Error(`missing CLI option metadata: ${name}`);
+  }
+  return option.help;
+}
+
 function printHelp(command = ""): void {
-  if (command === "review") {
-    process.stdout.write(`clawpatch review
-
-Usage:
-  clawpatch review [flags]
-
-Flags:
-  --feature <id>
-  --feature-list <path>
-  --project <name-or-root>
-  --limit <n>
-  --since <ref>
-  --include-dirty
-  --jobs <n>        default: ~half of CPU cores, max 10
-  --mode <default|deslopify>
-  --rate-limit-per-minute <n>   cap provider calls per 60s window (env: CLAWPATCH_RPM)
-  --provider <name>
-  --model <name>
-  --reasoning-effort <none|minimal|low|medium|high|xhigh>
-  --skip-git-repo-check
-  --dry-run
-  --prompt-file <path>    appends extra reviewer guidance to the prompt;
-                          use "-" to read from stdin
-  --export-tribunal-ledger <path>
-                          after the review completes, emit a single
-                          JSONL file with one line per finding shaped
-                          for downstream Tribunal-style signed-ledger
-                          ingest. Opt-in; no effect when omitted.
-  --no-registry-verify    disable a configured npm-registry post-validator that
-                          drops findings whose "package X@Y is
-                          unpublished" claim is refuted by the registry.
-                          Set registryVerifier.enabled=true in config.json
-                          to opt in; this flag disables it for one run.
-  --json
-  -q, --quiet
-`);
-    return;
-  }
-  if (command === "report") {
-    process.stdout.write(`clawpatch report
-
-Usage:
-  clawpatch report [flags]
-
-Flags:
-  --status <status>
-  --severity <severity>
-  --feature <id>
-  --project <name-or-root>
-  --category <category>
-  --triage <triage>
-  --output <path>
-  --json
-`);
-    return;
-  }
-  if (command === "ci") {
-    process.stdout.write(`clawpatch ci
-
-Usage:
-  clawpatch ci [flags]
-
-Flags:
-  --since <ref>
-  --include-dirty
-  --limit <n>
-  --jobs <n>        default: ~half of CPU cores, max 10
-  --rate-limit-per-minute <n>   cap provider calls per 60s window (env: CLAWPATCH_RPM)
-  --provider <name>
-  --model <name>
-  --reasoning-effort <none|minimal|low|medium|high|xhigh>
-  --skip-git-repo-check
-  --output <path>
-  --no-registry-verify    see clawpatch review --help for details
-  --json
-`);
-    return;
-  }
-  if (command === "show") {
-    process.stdout.write(`clawpatch show
-
-Usage:
-  clawpatch show --finding <id> [flags]
-
-Flags:
-  --finding <id>
-  --json
-`);
-    return;
-  }
-  if (command === "next") {
-    process.stdout.write(`clawpatch next
-
-Usage:
-  clawpatch next [flags]
-
-Flags:
-  --status <status>  default: open
-  --project <name-or-root>
-  --json
-`);
-    return;
-  }
-  if (command === "triage") {
-    process.stdout.write(`clawpatch triage
-
-Usage:
-  clawpatch triage --finding <id> --status <status> [flags]
-
-Flags:
-  --finding <id>
-  --status <open|false-positive|fixed|wont-fix|uncertain>
-  --note <text>
-  --json
-`);
-    return;
-  }
-  if (command === "fix") {
-    process.stdout.write(`clawpatch fix
-
-Usage:
-  clawpatch fix --finding <id> [flags]
-
-Flags:
-  --finding <id>
-  --provider <name>
-  --model <name>
-  --reasoning-effort <none|minimal|low|medium|high|xhigh>
-  --skip-git-repo-check
-  --dry-run
-  --json
-`);
-    return;
-  }
-  if (command === "open-pr") {
-    process.stdout.write(`clawpatch open-pr
-
-Usage:
-  clawpatch open-pr --patch <id> [flags]
-
-Flags:
-  --patch <id>
-  --base <branch>
-  --branch <branch>
-  --title <title>
-  --draft
-  --dry-run
-  --force
-  --json
-`);
-    return;
-  }
-  if (command === "init") {
-    process.stdout.write(`clawpatch init
-
-Usage:
-  clawpatch init [flags]
-
-Flags:
-  --force
-  --json
-`);
-    return;
-  }
-  if (command === "map") {
-    process.stdout.write(`clawpatch map
-
-Usage:
-  clawpatch map [flags]
-
-Flags:
-  --source <heuristic|auto|agent>
-  --provider <name>
-  --model <name>
-  --reasoning-effort <none|minimal|low|medium|high|xhigh>
-  --skip-git-repo-check
-  --dry-run
-  --json
-`);
-    return;
-  }
-  if (command === "revalidate") {
-    process.stdout.write(`clawpatch revalidate
-
-Usage:
-  clawpatch revalidate --finding <id> [flags]
-  clawpatch revalidate --since <ref> [flags]
-
-Flags:
-  --finding <id>
-  --all
-  --status <status>
-  --severity <severity>
-  --feature <id>
-  --category <category>
-  --triage <triage>
-  --limit <n>
-  --since <ref>
-  --include-dirty
-  --provider <name>
-  --model <name>
-  --reasoning-effort <none|minimal|low|medium|high|xhigh>
-  --skip-git-repo-check
-  --json
-`);
-    return;
-  }
-  if (command === "status") {
-    process.stdout.write(`clawpatch status
-
-Usage:
-  clawpatch status [flags]
-
-Flags:
-  --json
-`);
-    return;
-  }
-  if (command === "doctor") {
-    process.stdout.write(`clawpatch doctor
-
-Usage:
-  clawpatch doctor [flags]
-
-Flags:
-  --provider <name>
-  --model <name>
-  --reasoning-effort <none|minimal|low|medium|high|xhigh>
-  --json
-`);
-    return;
-  }
-  if (command === "clean-locks") {
-    process.stdout.write(`clawpatch clean-locks
-
-Usage:
-  clawpatch clean-locks [flags]
-
-Flags:
-  --json
-`);
-    return;
-  }
-  process.stdout.write(`clawpatch: automated code review that lands fixes
-
-Usage:
-  clawpatch [global flags] <command> [flags]
-
-Commands:
-  init
-  map
-  status
-  review
-  ci
-  report
-  show
-  next
-  triage
-  fix
-  open-pr
-  revalidate
-  doctor
-  clean-locks
-
-Global flags:
-  --root <path>
-  --state-dir <path>
-  --config <path>
-  --json
-  --plain
-  -q, --quiet
-  -v, --verbose
-  --debug
-  --no-color
-  --no-input
-  -h, --help
-  --version
-`);
+  process.stdout.write(helpText(command));
 }
 
 if (isMainModule()) {
