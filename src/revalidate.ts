@@ -3,7 +3,7 @@ import { filterFindingsByFileFlags } from "./command-selection.js";
 import { applyProviderFlags, newRun, providerOptions, stringFlag } from "./command-support.js";
 import { ClawpatchError, assertDefined } from "./errors.js";
 import { appendFindingHistory } from "./findings.js";
-import { refreshFeatureStatus } from "./feature-status.js";
+import { refreshFeatureStatuses } from "./feature-status.js";
 import { nowIso } from "./fs.js";
 import { discoverGit } from "./git.js";
 import { runId } from "./id.js";
@@ -29,10 +29,13 @@ export async function revalidateCommand(
   const config = applyProviderFlags(loaded.config, flags);
   const provider = providerByName(config.provider.name);
   const findings = await selectRevalidationFindings(loaded, flags);
-  const [features, patchAttempts] = await Promise.all([
+  const [features, patchAttempts, allFindings] = await Promise.all([
     readFeatures(loaded.paths),
     readPatchAttempts(loaded.paths),
+    readFindings(loaded.paths),
   ]);
+  const findingsById = new Map(allFindings.map((finding) => [finding.findingId, finding]));
+  const touchedFeatureIds = new Set<string>();
   const currentRunId = runId();
   const currentGit = await discoverGit(loaded.root);
   const run = newRun(currentRunId, "revalidate", context, loaded.root, currentGit.headSha);
@@ -88,7 +91,8 @@ export async function revalidateCommand(
         },
       );
       await writeFinding(loaded.paths, updated);
-      await refreshFeatureStatus(loaded.paths, finding.featureId);
+      findingsById.set(updated.findingId, updated);
+      touchedFeatureIds.add(updated.featureId);
       results.push({
         finding: finding.findingId,
         outcome: output.outcome,
@@ -102,6 +106,12 @@ export async function revalidateCommand(
         elapsed: `${Math.round((Date.now() - started) / 1000)}s`,
       });
     }
+    await refreshFeatureStatuses(
+      loaded.paths,
+      features,
+      [...findingsById.values()],
+      touchedFeatureIds,
+    );
     await writeRun(loaded.paths, {
       ...run,
       status: "completed",
@@ -118,12 +128,36 @@ export async function revalidateCommand(
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
+    let statusRefreshError: unknown = null;
+    try {
+      await refreshFeatureStatuses(
+        loaded.paths,
+        features,
+        [...findingsById.values()],
+        touchedFeatureIds,
+      );
+    } catch (refreshError: unknown) {
+      statusRefreshError = refreshError;
+    }
     await writeRun(loaded.paths, {
       ...run,
       status: "failed",
       finishedAt: nowIso(),
       findingIds: run.findingIds,
-      errors: [{ message, code: error instanceof ClawpatchError ? error.code : null }],
+      errors: [
+        { message, code: error instanceof ClawpatchError ? error.code : null },
+        ...(statusRefreshError === null
+          ? []
+          : [
+              {
+                message:
+                  statusRefreshError instanceof Error
+                    ? statusRefreshError.message
+                    : String(statusRefreshError),
+                code: statusRefreshError instanceof ClawpatchError ? statusRefreshError.code : null,
+              },
+            ]),
+      ],
     });
     emitProgress(context, "revalidate", "failed", {
       run: currentRunId,
