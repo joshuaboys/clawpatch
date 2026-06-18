@@ -6,7 +6,7 @@ import {
   hasSourceDirtyWorktree,
   sourceChangedSnapshots,
 } from "./change-audit.js";
-import { loadConfig, resolveStateDir, GlobalOptions } from "./config.js";
+import { loadConfig, parseReasoningEffort, resolveStateDir, GlobalOptions } from "./config.js";
 import { detectProject } from "./detect.js";
 import { ClawpatchError, assertDefined } from "./errors.js";
 import { runCommand, runCommandArgs } from "./exec.js";
@@ -77,8 +77,6 @@ import {
   PatchAttempt,
   ReviewOutput,
   RunRecord,
-  reasoningEffortSchema,
-  reasoningEfforts,
 } from "./types.js";
 import { validationCommandsForFeature } from "./validation.js";
 import { createRpmLimiter, defaultJobs, rpmFromFlag, type RpmLimiter } from "./rpm-limiter.js";
@@ -1979,21 +1977,6 @@ function providerOptions(config: ReturnType<typeof applyProviderFlags>) {
     codexConfig: config.provider.codexConfig,
     skipGitRepoCheck: config.provider.skipGitRepoCheck,
   };
-}
-
-function parseReasoningEffort(value: string | undefined) {
-  if (value === undefined) {
-    return undefined;
-  }
-  const parsed = reasoningEffortSchema.safeParse(value);
-  if (parsed.success) {
-    return parsed.data;
-  }
-  throw new ClawpatchError(
-    `invalid reasoning effort: ${value}; expected ${reasoningEfforts.join(", ")}`,
-    2,
-    "invalid-usage",
-  );
 }
 
 function parseMapSource(flags: Record<string, string | boolean>): "heuristic" | "auto" | "agent" {

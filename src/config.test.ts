@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { join } from "node:path";
-import { defaultConfig, loadConfig } from "./config.js";
+import { defaultConfig, loadConfig, parseReasoningEffort } from "./config.js";
 import { fixtureRoot, testOptions, writeFixture } from "./test-helpers.js";
 
 const originalConfig = process.env["CLAWPATCH_CONFIG"];
@@ -38,6 +38,17 @@ function configWithCodexPassthrough() {
 }
 
 describe("loadConfig", () => {
+  it("returns independent mutable defaults", () => {
+    const first = defaultConfig();
+    const second = defaultConfig();
+
+    first.commands.test = "changed";
+    first.provider.codexConfig["model"] = "changed";
+
+    expect(second.commands.test).toBeNull();
+    expect(second.provider.codexConfig).toEqual({});
+  });
+
   it("defaults Codex passthrough config to an empty object", async () => {
     const root = await fixtureRoot("clawpatch-default-config-");
 
@@ -90,5 +101,13 @@ describe("loadConfig", () => {
       model_provider: "openai",
       "model_providers.openai.env_key": "OPENAI_API_KEY",
     });
+  });
+});
+
+describe("parseReasoningEffort", () => {
+  it("shares flag and environment parsing semantics", () => {
+    expect(parseReasoningEffort(undefined)).toBeUndefined();
+    expect(parseReasoningEffort("xhigh")).toBe("xhigh");
+    expect(() => parseReasoningEffort("maximum")).toThrow(/expected none, minimal/u);
   });
 });

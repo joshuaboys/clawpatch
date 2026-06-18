@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
 
@@ -25,8 +25,16 @@ export async function readJson<T>(path: string, schema: z.ZodType<T>): Promise<T
 export async function writeJson(path: string, value: unknown): Promise<void> {
   await ensureDir(dirname(path));
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}-${randomUUID()}`;
-  await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-  await rename(tmp, path);
+  let renamed = false;
+  try {
+    await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+    await rename(tmp, path);
+    renamed = true;
+  } finally {
+    if (!renamed) {
+      await unlink(tmp).catch(() => {});
+    }
+  }
 }
 
 export function nowIso(): string {

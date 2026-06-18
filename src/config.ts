@@ -29,13 +29,6 @@ type ConfigDiscovery = {
   source: ConfigSource;
 };
 
-export const defaultCommands: ProjectCommands = {
-  typecheck: null,
-  lint: null,
-  format: null,
-  test: null,
-};
-
 export function defaultConfig(): ClawpatchConfig {
   return {
     schemaVersion: 1,
@@ -56,7 +49,7 @@ export function defaultConfig(): ClawpatchConfig {
       reasoningEffort: null,
       codexConfig: {},
     },
-    commands: defaultCommands,
+    commands: defaultCommands(),
     review: {
       maxContextFiles: 24,
       maxOwnedFiles: 12,
@@ -96,7 +89,7 @@ export function resolveStateDir(root: string, config: ClawpatchConfig): string {
   return resolve(root, config.stateDir);
 }
 
-function parseReasoningEffort(value: string | undefined) {
+export function parseReasoningEffort(value: string | undefined) {
   if (value === undefined) {
     return undefined;
   }
@@ -109,6 +102,15 @@ function parseReasoningEffort(value: string | undefined) {
     2,
     "invalid-usage",
   );
+}
+
+function defaultCommands(): ProjectCommands {
+  return {
+    typecheck: null,
+    lint: null,
+    format: null,
+    test: null,
+  };
 }
 
 function assertTrustedCodexConfig(config: ClawpatchConfig, source: ConfigSource | null): void {
