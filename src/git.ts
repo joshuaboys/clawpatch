@@ -2,6 +2,7 @@ import { realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { runCommand } from "./exec.js";
 import { ClawpatchError } from "./errors.js";
+import { parseGitStatus } from "./git-status.js";
 
 export type GitInfo = {
   root: string | null;
@@ -106,21 +107,10 @@ export async function dirtyFiles(root: string): Promise<Set<string>> {
       "git-failure",
     );
   }
-  const fields = result.stdout.split("\0").filter((field) => field.length > 0);
   const paths = new Set<string>();
-  for (let index = 0; index < fields.length; index += 1) {
-    const field = fields[index] ?? "";
-    if (field.length < 4) {
-      continue;
-    }
-    const status = field.slice(0, 2);
-    addDirtyPath(paths, resolvedRoot, resolvedGitRoot, field.slice(3));
-    if (/[RC]/u.test(status)) {
-      const secondary = fields[index + 1] ?? "";
-      if (secondary.length > 0) {
-        addDirtyPath(paths, resolvedRoot, resolvedGitRoot, secondary);
-      }
-      index += 1;
+  for (const change of parseGitStatus(result.stdout)) {
+    for (const path of change.paths) {
+      addDirtyPath(paths, resolvedRoot, resolvedGitRoot, path);
     }
   }
   return paths;

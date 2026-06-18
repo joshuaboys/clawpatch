@@ -18,6 +18,7 @@ import {
 } from "./findings.js";
 import { nowIso, writeJson } from "./fs.js";
 import { changedFilesSince, dirtyFiles, discoverGit, findProjectRoot } from "./git.js";
+import { parseGitStatus } from "./git-status.js";
 import { stableId, runId } from "./id.js";
 import { mapWithSource } from "./agent-mapper.js";
 import { mapFeatures } from "./mapper.js";
@@ -1768,7 +1769,7 @@ async function assertPatchWorktree(
       },
     ),
   );
-  const statusChanges = gitStatusChanges(status.stdout);
+  const statusChanges = parseGitStatus(status.stdout);
   const dirty = uniqueStrings(statusChanges.flatMap((change) => change.paths));
   const statePrefix = await gitRelativePathPrefix(gitRoot, stateDir);
   const sourceDirty = dirty.filter((file) => !isStatePath(file, statePrefix));
@@ -1822,36 +1823,6 @@ async function patchStagePlan(
   const addFiles = await existingGitFiles(root, stageableFiles);
   const updateFiles = stageableFiles.filter((file) => !addFiles.includes(file));
   return { commitFiles: patchWorktree.commitFiles, addFiles, updateFiles };
-}
-
-type GitStatusChange = {
-  paths: string[];
-  primaryPath: string;
-  secondaryPath: string | undefined;
-};
-
-function gitStatusChanges(output: string): GitStatusChange[] {
-  const fields = output.split("\0").filter((field) => field.length > 0);
-  const changes: GitStatusChange[] = [];
-  for (let index = 0; index < fields.length; index += 1) {
-    const field = fields[index] ?? "";
-    if (field.length < 4) {
-      continue;
-    }
-    const status = field.slice(0, 2);
-    const primaryPath = normalizePath(field.slice(3));
-    const paths = [primaryPath];
-    let secondaryPath: string | undefined;
-    if (/[RC]/u.test(status)) {
-      secondaryPath = normalizePath(fields[index + 1] ?? "");
-      if (secondaryPath.length > 0) {
-        paths.push(secondaryPath);
-      }
-      index += 1;
-    }
-    changes.push({ paths, primaryPath, secondaryPath });
-  }
-  return changes;
 }
 
 function isStatePath(file: string, statePrefix: string): boolean {

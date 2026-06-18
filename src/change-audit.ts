@@ -3,6 +3,7 @@ import { createReadStream } from "node:fs";
 import { lstat, readdir, readlink } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import { runCommand } from "./exec.js";
+import { parseGitStatus } from "./git-status.js";
 
 export async function hasSourceDirtyWorktree(root: string, stateDir: string): Promise<boolean> {
   const paths = await sourceChangedPaths(root, stateDir);
@@ -40,9 +41,9 @@ async function sourceChangedPaths(root: string, stateDir: string): Promise<Set<s
   }
   const relativeStateDir = normalizePath(relative(root, stateDir));
   return new Set(
-    parsePorcelainPaths(result.stdout).filter(
-      (path) => path.length > 0 && !isStatePath(path, relativeStateDir),
-    ),
+    parseGitStatus(result.stdout)
+      .map((change) => change.primaryPath)
+      .filter((path) => path.length > 0 && !isStatePath(path, relativeStateDir)),
   );
 }
 
@@ -67,24 +68,6 @@ async function pathFingerprint(root: string, path: string): Promise<string> {
     return "unreadable";
   }
   return `file:${info.mode}:${info.size}:${hash.digest("hex")}`;
-}
-
-function parsePorcelainPaths(output: string): string[] {
-  const fields = output.split("\0").filter((field) => field.length > 0);
-  const paths: string[] = [];
-  for (let index = 0; index < fields.length; index += 1) {
-    const field = fields[index] ?? "";
-    if (field.length < 4) {
-      continue;
-    }
-    const status = field.slice(0, 2);
-    const path = normalizePath(field.slice(3));
-    paths.push(path);
-    if (/[RC]/u.test(status)) {
-      index += 1;
-    }
-  }
-  return paths;
 }
 
 function isStatePath(path: string, relativeStateDir: string): boolean {
