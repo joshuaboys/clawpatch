@@ -6,7 +6,8 @@ import {
   hasSourceDirtyWorktree,
   sourceChangedSnapshots,
 } from "./change-audit.js";
-import { loadConfig, parseReasoningEffort, resolveStateDir, GlobalOptions } from "./config.js";
+import { loadConfig, parseReasoningEffort, resolveStateDir } from "./config.js";
+import { loadProjectState, type AppContext } from "./app-context.js";
 import { detectProject } from "./detect.js";
 import { ClawpatchError, assertDefined } from "./errors.js";
 import { runCommand, runCommandArgs } from "./exec.js";
@@ -17,7 +18,7 @@ import {
   parseFindingStatus,
 } from "./findings.js";
 import { nowIso, writeJson } from "./fs.js";
-import { changedFilesSince, dirtyFiles, discoverGit, findProjectRoot } from "./git.js";
+import { changedFilesSince, dirtyFiles, discoverGit } from "./git.js";
 import { parseGitStatus } from "./git-status.js";
 import { stableId, runId } from "./id.js";
 import { mapWithSource } from "./agent-mapper.js";
@@ -82,14 +83,7 @@ import {
 import { validationCommandsForFeature } from "./validation.js";
 import { createRpmLimiter, defaultJobs, rpmFromFlag, type RpmLimiter } from "./rpm-limiter.js";
 
-export type AppContext = {
-  root: string;
-  options: GlobalOptions;
-};
-
-export async function makeContext(options: GlobalOptions): Promise<AppContext> {
-  return { root: await findProjectRoot(process.cwd(), options.root), options };
-}
+export { makeContext, type AppContext } from "./app-context.js";
 
 export async function initCommand(
   context: AppContext,
@@ -1410,17 +1404,6 @@ export async function cleanLocksCommand(context: AppContext): Promise<unknown> {
   }
   const lockFilesCleared = await clearFeatureLockFiles(loaded.paths);
   return { cleared, lockFilesCleared };
-}
-
-async function loadProjectState(context: AppContext) {
-  const config = await loadConfig(context.root, context.options);
-  const paths = statePaths(resolveStateDir(context.root, config));
-  const project = await readProject(paths);
-  if (project === null) {
-    throw new ClawpatchError("not initialized; run clawpatch init", 2, "not-initialized");
-  }
-  await ensureStateDirs(paths);
-  return { root: context.root, config, paths, project };
 }
 
 async function ensureInitialized(context: AppContext): Promise<boolean> {
