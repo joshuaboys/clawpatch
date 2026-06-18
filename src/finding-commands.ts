@@ -6,13 +6,8 @@ import { assertDefined } from "./errors.js";
 import { appendFindingHistory, parseFindingStatus } from "./findings.js";
 import { refreshFeatureStatus } from "./feature-status.js";
 import { nowIso } from "./fs.js";
-import {
-  evidenceLabel,
-  findingSummaries,
-  findingSummary,
-  renderFindingDetail,
-  renderReport,
-} from "./reporting.js";
+import { evidenceLabel, findingSummaries, findingSummary } from "./finding-presentation.js";
+import { renderFindingDetail, renderReport } from "./reporting.js";
 import {
   filterFeaturesByProject,
   filterFindings,
