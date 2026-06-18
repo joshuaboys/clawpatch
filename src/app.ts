@@ -1,18 +1,12 @@
 import { appendFile, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { cpus, hostname } from "node:os";
-import {
-  changedPathsBetweenSnapshots,
-  hasSourceDirtyWorktree,
-  sourceChangedSnapshots,
-} from "./change-audit.js";
 import { loadConfig, parseReasoningEffort, resolveStateDir } from "./config.js";
 import { applyProviderFlags, newRun, providerOptions, stringFlag } from "./command-support.js";
 import { changedFiles } from "./command-selection.js";
 import { loadProjectState, type AppContext } from "./app-context.js";
 import { detectProject } from "./detect.js";
 import { ClawpatchError, assertDefined } from "./errors.js";
-import { runCommand } from "./exec.js";
 import {
   appendFindingHistory,
   findingFromOutput,
@@ -22,13 +16,13 @@ import {
 import { refreshFeatureStatus } from "./feature-status.js";
 import { nowIso, writeJson } from "./fs.js";
 import { discoverGit } from "./git.js";
-import { stableId, runId } from "./id.js";
+import { runId } from "./id.js";
 import { mapWithSource } from "./agent-mapper.js";
 import { mapFeatures } from "./mapper.js";
 import { emitProgress } from "./progress.js";
 import { providerByName } from "./provider.js";
 import type { DroppedFinding } from "./provider-types.js";
-import { buildFixPrompt, buildReviewPromptBundle } from "./prompt.js";
+import { buildReviewPromptBundle } from "./prompt.js";
 import type { ReviewMode, ReviewPromptManifest } from "./prompt.js";
 import {
   evidenceLabel,
@@ -67,26 +61,18 @@ import {
   statePaths,
   writeFeature,
   writeFinding,
-  writePatchAttempt,
   writeProject,
   writeRun,
   releaseFeatureLock,
 } from "./state.js";
-import {
-  CommandResult,
-  FeatureRecord,
-  FixPlanOutput,
-  FindingRecord,
-  PatchAttempt,
-  ReviewOutput,
-  RunRecord,
-} from "./types.js";
+import { FeatureRecord, FindingRecord, ReviewOutput, RunRecord } from "./types.js";
 import { validationCommandsForFeature } from "./validation.js";
 import { createRpmLimiter, defaultJobs, rpmFromFlag, type RpmLimiter } from "./rpm-limiter.js";
 
 export { makeContext, type AppContext } from "./app-context.js";
 export { openPrCommand } from "./open-pr.js";
 export { revalidateCommand } from "./revalidate.js";
+export { fixCommand } from "./fix.js";
 
 export async function initCommand(
   context: AppContext,
@@ -893,157 +879,6 @@ function reviewRetries(): number {
 
 function isRetryableReviewError(error: unknown): boolean {
   return error instanceof ClawpatchError && error.code === "malformed-output";
-}
-
-export async function fixCommand(
-  context: AppContext,
-  flags: Record<string, string | boolean>,
-): Promise<unknown> {
-  const loaded = await loadProjectState(context);
-  const findingId = assertDefined(stringFlag(flags, "finding"), "missing --finding");
-  const config = applyProviderFlags(loaded.config, flags);
-  const git = await discoverGit(loaded.root);
-  const dirty =
-    git.root === null && config.provider.skipGitRepoCheck
-      ? false
-      : await hasSourceDirtyWorktree(loaded.root, loaded.paths.stateDir);
-  if (config.git.requireCleanWorktreeForFix && dirty && flags["dryRun"] !== true) {
-    throw new ClawpatchError(
-      "dirty worktree blocks fix; commit/stash first or use --dry-run",
-      3,
-      "dirty-worktree",
-    );
-  }
-  const finding = assertDefined(
-    await readFinding(loaded.paths, findingId),
-    `finding not found: ${findingId}`,
-  );
-  const features = await readFeatures(loaded.paths);
-  const feature = assertDefined(
-    features.find((candidate) => candidate.featureId === finding.featureId),
-    `feature not found: ${finding.featureId}`,
-  );
-  const patchAttemptId = stableId("pat", [finding.findingId, nowIso()]);
-  const provider = providerByName(config.provider.name);
-  const createdAt = nowIso();
-  const initialPatch: PatchAttempt = {
-    schemaVersion: 1,
-    patchAttemptId,
-    findingIds: [finding.findingId],
-    featureIds: [feature.featureId],
-    status: "planned",
-    plan: `Fix ${finding.title}`,
-    filesChanged: [],
-    commandsRun: [],
-    testResults: [],
-    provider: null,
-    git: {
-      baseSha: git.headSha,
-      commitSha: null,
-      branchName: git.currentBranch,
-      prUrl: null,
-    },
-    createdAt,
-    updatedAt: createdAt,
-  };
-  const prompt = await buildFixPrompt(loaded.root, finding, feature, config);
-  if (flags["dryRun"] === true) {
-    const validationCommands = validationCommandsForFeature(feature, config.commands);
-    return {
-      finding: finding.findingId,
-      dryRun: true,
-      patchAttempt: patchAttemptId,
-      plan: initialPatch.plan,
-      validation: validationCommands.length === 0 ? "none" : validationCommands.join("; "),
-    };
-  }
-  await writePatchAttempt(loaded.paths, initialPatch);
-  const startedAt = nowIso();
-  const beforeChanged =
-    (await sourceChangedSnapshots(loaded.root, loaded.paths.stateDir)) ?? new Map();
-  let plan: FixPlanOutput;
-  try {
-    plan = await provider.fix(loaded.root, prompt, providerOptions(config));
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    await writePatchAttempt(loaded.paths, {
-      ...initialPatch,
-      status: "failed",
-      plan: `${initialPatch.plan}\n\nProvider failed: ${message}`,
-      provider: {
-        name: provider.name,
-        model: config.provider.model,
-        reasoningEffort: config.provider.reasoningEffort,
-        requestId: null,
-        startedAt,
-        finishedAt: nowIso(),
-      },
-      updatedAt: nowIso(),
-    });
-    await writeFinding(loaded.paths, {
-      ...finding,
-      linkedPatchAttemptIds: Array.from(
-        new Set([...finding.linkedPatchAttemptIds, patchAttemptId]),
-      ),
-      updatedAt: nowIso(),
-    });
-    throw error;
-  }
-  const validationCommands = validationCommandsForFeature(feature, config.commands);
-  const commandsRun: CommandResult[] = [];
-  for (const command of validationCommands) {
-    commandsRun.push(await runCommand(command, loaded.root));
-  }
-  const afterChanged =
-    (await sourceChangedSnapshots(loaded.root, loaded.paths.stateDir)) ?? new Map();
-  const filesChanged = changedPathsBetweenSnapshots(beforeChanged, afterChanged);
-  const failed = commandsRun.some((result) => result.exitCode !== 0);
-  const patch: PatchAttempt = {
-    ...initialPatch,
-    status: failed ? "failed" : "applied",
-    plan: plan.summary,
-    filesChanged,
-    commandsRun,
-    testResults: commandsRun,
-    provider: {
-      name: provider.name,
-      model: config.provider.model,
-      reasoningEffort: config.provider.reasoningEffort,
-      requestId: null,
-      startedAt,
-      finishedAt: nowIso(),
-    },
-    updatedAt: nowIso(),
-  };
-  await writePatchAttempt(loaded.paths, patch);
-  const updatedFinding: FindingRecord = {
-    ...finding,
-    linkedPatchAttemptIds: Array.from(new Set([...finding.linkedPatchAttemptIds, patchAttemptId])),
-    status: failed ? "open" : "uncertain",
-    updatedAt: nowIso(),
-  };
-  await writeFinding(loaded.paths, updatedFinding);
-  if (failed) {
-    throw new ClawpatchError("validation failed after applying fix", 6, "validation-failed");
-  }
-  return {
-    finding: finding.findingId,
-    dryRun: false,
-    patchAttempt: patchAttemptId,
-    status: patch.status,
-    filesChanged: filesChanged.length,
-    changedFiles: filesChanged.length === 0 ? "none" : filesChanged.join(", "),
-    commands: commandsRun.length,
-    validation:
-      commandsRun.length === 0
-        ? "none"
-        : commandsRun
-            .map((result) => `${result.command} => ${result.exitCode ?? "unknown"}`)
-            .join("; "),
-    next: failed
-      ? `inspect ${patchAttemptId}`
-      : `clawpatch revalidate --finding ${finding.findingId}`,
-  };
 }
 
 export async function doctorCommand(
