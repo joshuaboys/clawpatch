@@ -107,37 +107,31 @@ export function parseArgs(argv: string[]): ParsedArgs {
       command = arg;
       continue;
     }
-    const globalValueName = arg.startsWith("--") ? camel(arg.replace(/^--/u, "")) : "";
-    const target = isGlobalFlag(globalValueName) ? global : flags;
     if (arg === "-h" || arg === "--help") {
       return { command, flags, global, help: true, version: false };
     }
     if (arg === "--version") {
       return { command, flags, global, help: false, version: true };
     }
-    const valueName = arg.replace(/^--/u, "");
-    if (valueFlagNames.has(valueName)) {
+    const longName = arg.startsWith("--") ? arg.slice(2) : "";
+    const longOption = optionSpecs[longName];
+    if (longOption?.kind === "value") {
       const next = readFlagValue(argv, index, arg);
       index += 1;
-      setFlag(target, camel(valueName), next);
+      setOption(global, flags, longOption, next);
       continue;
     }
-    if (arg.startsWith("--") && isBooleanFlag(valueName)) {
-      setFlag(target, camel(valueName), true);
+    if (longOption?.kind === "boolean") {
+      setOption(global, flags, longOption, true);
       continue;
     }
-    if (arg === "-q") {
-      global.quiet = true;
-      continue;
-    }
-    if (arg === "-v") {
-      global.verbose = true;
-      continue;
-    }
-    if (arg === "-o") {
-      const next = readFlagValue(argv, index, "-o");
-      index += 1;
-      flags["output"] = next;
+    const shortOption = shortOptionSpecs[arg];
+    if (shortOption !== undefined) {
+      const value = shortOption.kind === "value" ? readFlagValue(argv, index, arg) : true;
+      if (shortOption.kind === "value") {
+        index += 1;
+      }
+      setOption(global, flags, shortOption, value);
       continue;
     }
     throw new ClawpatchError(`unknown arg: ${arg}`, 2, "invalid-usage");
@@ -219,55 +213,80 @@ const requiredCommandFlags: Partial<Record<keyof typeof commandFlags, string[]>>
   "open-pr": ["patch"],
 };
 
-const valueFlagNames = new Set([
-  "root",
-  "state-dir",
-  "config",
-  "feature",
-  "feature-list",
-  "finding",
-  "limit",
-  "since",
-  "jobs",
-  "mode",
-  "rate-limit-per-minute",
-  "source",
-  "provider",
-  "model",
-  "reasoning-effort",
-  "prompt-file",
-  "export-tribunal-ledger",
-  "output",
-  "status",
-  "severity",
-  "category",
-  "triage",
-  "project",
-  "note",
-  "patch",
-  "base",
-  "branch",
-  "title",
-]);
+type OptionSpec = {
+  name: string;
+  kind: "value" | "boolean";
+  target: "global" | "command";
+};
 
-const booleanFlagNames = new Set([
-  "json",
-  "plain",
-  "quiet",
-  "verbose",
-  "debug",
-  "no-color",
-  "no-input",
-  "dry-run",
-  "skip-git-repo-check",
-  "force",
-  "all",
-  "draft",
-  "include-dirty",
-  "no-registry-verify",
-]);
+const optionSpecs: Record<string, OptionSpec> = {
+  root: { name: "root", kind: "value", target: "global" },
+  "state-dir": { name: "stateDir", kind: "value", target: "global" },
+  config: { name: "config", kind: "value", target: "global" },
+  json: { name: "json", kind: "boolean", target: "global" },
+  plain: { name: "plain", kind: "boolean", target: "global" },
+  quiet: { name: "quiet", kind: "boolean", target: "global" },
+  verbose: { name: "verbose", kind: "boolean", target: "global" },
+  debug: { name: "debug", kind: "boolean", target: "global" },
+  "no-color": { name: "noColor", kind: "boolean", target: "global" },
+  "no-input": { name: "noInput", kind: "boolean", target: "global" },
+  feature: { name: "feature", kind: "value", target: "command" },
+  "feature-list": { name: "featureList", kind: "value", target: "command" },
+  finding: { name: "finding", kind: "value", target: "command" },
+  limit: { name: "limit", kind: "value", target: "command" },
+  since: { name: "since", kind: "value", target: "command" },
+  jobs: { name: "jobs", kind: "value", target: "command" },
+  mode: { name: "mode", kind: "value", target: "command" },
+  "rate-limit-per-minute": {
+    name: "rateLimitPerMinute",
+    kind: "value",
+    target: "command",
+  },
+  source: { name: "source", kind: "value", target: "command" },
+  provider: { name: "provider", kind: "value", target: "command" },
+  model: { name: "model", kind: "value", target: "command" },
+  "reasoning-effort": { name: "reasoningEffort", kind: "value", target: "command" },
+  "prompt-file": { name: "promptFile", kind: "value", target: "command" },
+  "export-tribunal-ledger": {
+    name: "exportTribunalLedger",
+    kind: "value",
+    target: "command",
+  },
+  output: { name: "output", kind: "value", target: "command" },
+  status: { name: "status", kind: "value", target: "command" },
+  severity: { name: "severity", kind: "value", target: "command" },
+  category: { name: "category", kind: "value", target: "command" },
+  triage: { name: "triage", kind: "value", target: "command" },
+  project: { name: "project", kind: "value", target: "command" },
+  note: { name: "note", kind: "value", target: "command" },
+  patch: { name: "patch", kind: "value", target: "command" },
+  base: { name: "base", kind: "value", target: "command" },
+  branch: { name: "branch", kind: "value", target: "command" },
+  title: { name: "title", kind: "value", target: "command" },
+  "dry-run": { name: "dryRun", kind: "boolean", target: "command" },
+  "skip-git-repo-check": {
+    name: "skipGitRepoCheck",
+    kind: "boolean",
+    target: "command",
+  },
+  force: { name: "force", kind: "boolean", target: "command" },
+  all: { name: "all", kind: "boolean", target: "command" },
+  draft: { name: "draft", kind: "boolean", target: "command" },
+  "include-dirty": { name: "includeDirty", kind: "boolean", target: "command" },
+  "no-registry-verify": {
+    name: "noRegistryVerify",
+    kind: "boolean",
+    target: "command",
+  },
+};
 
-const shortFlagNames = new Set(["-h", "-q", "-v", "-o"]);
+const shortOptionSpecs: Record<string, OptionSpec> = {
+  "-q": optionSpecs["quiet"]!,
+  "-v": optionSpecs["verbose"]!,
+  "-o": optionSpecs["output"]!,
+};
+
+const shortFlagNames = new Set(["-h", ...Object.keys(shortOptionSpecs)]);
 
 export function packageVersion(): string {
   const pkg = moduleRequire("../package.json") as { version?: unknown };
@@ -344,10 +363,6 @@ function isKnownCommand(command: string): command is keyof typeof commandFlags {
   return Object.hasOwn(commandFlags, command);
 }
 
-function isBooleanFlag(name: string): boolean {
-  return booleanFlagNames.has(name);
-}
-
 function readFlagValue(argv: string[], index: number, flag: string): string {
   const next = argv[index + 1];
   if (next === undefined || isKnownOptionToken(next)) {
@@ -363,31 +378,18 @@ function isKnownOptionToken(value: string): boolean {
   return value.startsWith("--");
 }
 
-function setFlag(
-  target: Record<string, string | boolean>,
-  name: string,
+function setOption(
+  global: GlobalOptions,
+  flags: Record<string, string | boolean>,
+  option: OptionSpec,
   value: string | boolean,
 ): void {
-  target[name] = value;
-}
-
-function isGlobalFlag(name: string): name is keyof GlobalOptions {
-  return [
-    "root",
-    "stateDir",
-    "config",
-    "json",
-    "plain",
-    "quiet",
-    "verbose",
-    "debug",
-    "noColor",
-    "noInput",
-  ].includes(name);
-}
-
-function camel(value: string): string {
-  return value.replace(/-([a-z])/gu, (_match, letter: string) => letter.toUpperCase());
+  if (option.target === "global") {
+    const target = global as Record<string, string | boolean | undefined>;
+    target[option.name] = value;
+    return;
+  }
+  flags[option.name] = value;
 }
 
 function kebab(value: string): string {
