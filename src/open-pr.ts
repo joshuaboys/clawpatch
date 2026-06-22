@@ -225,7 +225,6 @@ function prBranchName(
     return patch.git.branchName;
   }
   if (
-    base !== null &&
     currentBranch !== null &&
     currentBranch !== base &&
     currentBranch !== "main" &&
